@@ -21,7 +21,7 @@
 #   0. help       显示此帮助信息。
 #   q. quit       退出菜单 (仅在交互模式下)。
 #
-# --- (c) 2025 - 自动生成 (V13 - 包含自我更新) ---
+# --- (c) 2025 - 自动生成 (V13 - 彩色日志) ---
 
 set -e
 set -u
@@ -36,7 +36,6 @@ MONGO_APT_SOURCE="/etc/apt/sources.list.d/mongodb-org-6.0.list"
 MONGO_GPG_KEY="/usr/share/keyrings/mongodb-server-6.0.gpg"
 CONFIG_FILE="$APP_DIR/data/config.json"
 SHORTCUT_PATH="/usr/local/bin/fm"
-# (新) 脚本更新源 URL
 UPDATE_URL="https://raw.githubusercontent.com/ypkin/ForumMonitor-LET/refs/heads/main/ForumMonitor.sh"
 
 # 颜色定义
@@ -219,10 +218,7 @@ run_test_ai() {
     fi
 }
 
-# (新) 自我更新功能
 run_update() {
-    # $0 是此脚本的路径 (例如 ./deploy_final.sh 或 /usr/local/bin/fm)
-    # realpath 会找到它的真实物理位置 (例如 /root/deploy_final.sh)
     local SCRIPT_PATH=$(realpath "$0")
     local TEMP_PATH="${SCRIPT_PATH}.new"
     
@@ -235,7 +231,6 @@ run_update() {
         return 1
     fi
     
-    # 语法检查新脚本
     if ! bash -n "$TEMP_PATH"; then
         echo -e "${RED}新脚本语法检查失败。为安全起见，已中止更新。${NC}"
         rm -f "$TEMP_PATH"
@@ -244,13 +239,11 @@ run_update() {
     
     echo "--- 下载并验证成功。正在应用更新... ---"
     chmod +x "$TEMP_PATH"
-    # 用新脚本覆盖旧脚本
     mv "$TEMP_PATH" "$SCRIPT_PATH"
     
     echo -e "${GREEN}更新完成！正在重新启动管理菜单...${NC}"
     sleep 2
     
-    # 执行新脚本，它将自动显示主菜单
     exec "$SCRIPT_PATH"
 }
 
@@ -632,7 +625,7 @@ urllib3<2.0
 lxml
 EOF
 
-    # F. 创建 send.py (Pushplus 版本)
+    # F. 创建 send.py (Pushplus 版本) - (*** V13: 彩色日志 ***)
     echo "--- 正在创建 Pushplus 通知脚本: $APP_DIR/send.py ---"
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
@@ -642,9 +635,18 @@ import os
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# (新) 简单的日志记录器
+# (新) 颜色和日志记录器
+GREEN = '\033[0;32m'
+RED = '\033[0;31m'
+NC = '\033[0m' # No Color
+
 def log(message):
-    print(f"[Pushplus] {message}")
+    if "成功" in message:
+        print(f"{GREEN}[Pushplus] {message}{NC}")
+    elif "错误" in message or "警告" in message or "失败" in message:
+        print(f"{RED}[Pushplus] {message}{NC}")
+    else:
+        print(f"[Pushplus] {message}")
 
 class NotificationSender:
     def __init__(self, config_path='data/config.json'):
