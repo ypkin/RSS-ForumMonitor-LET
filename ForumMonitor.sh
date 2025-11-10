@@ -15,11 +15,13 @@
 #   7. frequency  修改脚本遍历时间 (秒)。
 #   8. status     查看服务运行状态。
 #   9. logs       查看脚本实时日志 (按 Ctrl+C 退出)。
-#  10. test-push  发送一条 Pushplus 测试消息。
+#  10. test-ai    测试 Cloudflare AI 连通性。
+#  11. test-push  发送一条 Pushplus 测试消息。
+#  12. update     从 GitHub 更新此管理脚本。
 #   0. help       显示此帮助信息。
 #   q. quit       退出菜单 (仅在交互模式下)。
 #
-# --- (c) 2025 - 自动生成 (V9 - 包含推送测试) ---
+# --- (c) 2025 - 自动生成 (V13 - 包含自我更新) ---
 
 set -e
 set -u
@@ -34,17 +36,20 @@ MONGO_APT_SOURCE="/etc/apt/sources.list.d/mongodb-org-6.0.list"
 MONGO_GPG_KEY="/usr/share/keyrings/mongodb-server-6.0.gpg"
 CONFIG_FILE="$APP_DIR/data/config.json"
 SHORTCUT_PATH="/usr/local/bin/fm"
+# (新) 脚本更新源 URL
+UPDATE_URL="https://raw.githubusercontent.com/ypkin/ForumMonitor-LET/refs/heads/main/ForumMonitor.sh"
 
 # 颜色定义
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # --- 2. 辅助功能 ---
 
 check_service_exists() {
     if [ ! -f "$SYSTEMD_SERVICE_FILE" ]; then
-        echo "错误: 服务 $SERVICE_NAME 未安装。"
+        echo -e "${RED}错误: 服务 $SERVICE_NAME 未安装。${NC}"
         echo "请先运行 'fm 1' (安装)。"
         exit 1
     fi
@@ -123,7 +128,7 @@ run_edit_frequency() {
     read -p "请输入新的间隔时间 (单位: 秒): " NEW_FREQ
 
     if ! [[ "$NEW_FREQ" =~ ^[0-9]+$ ]]; then
-        echo "错误: 输入无效，必须是一个数字。"
+        echo -e "${RED}错误: 输入无效，必须是一个数字。${NC}"
         return 1
     fi
 
@@ -143,36 +148,110 @@ run_status() {
 run_logs() {
     check_service_exists
     echo "--- 正在显示 $SERVICE_NAME 实时日志... ---"
-    echo "--- (按 Ctrl+C 退出日志并返回菜单) ---"
+    echo -e "--- (${YELLOW}按 Ctrl+C 退出日志并返回菜单${NC}) ---"
     sleep 2
-    # -f = follow (实时)
     journalctl -u $SERVICE_NAME -f
 }
 
-# (新) Pushplus 推送测试
 run_test_push() {
     check_service_exists
     check_jq
 
     echo "--- 正在测试 Pushplus 推送... ---"
     
-    # 检查 Token 是否已在 config.json 中设置
     local PUSHPLUS_TOKEN=$(jq -r '.config.pushplus_token' "$CONFIG_FILE")
     if [ -z "$PUSHPLUS_TOKEN" ] || [ "$PUSHPLUS_TOKEN" == "YOUR_PUSHPLUS_TOKEN_HERE" ]; then
-        echo "错误: Pushplus Token 未在配置中设置。"
+        echo -e "${RED}错误: Pushplus Token 未在配置中设置。${NC}"
         echo "请先运行 'fm 6' (edit) 来设置 Token。"
         return 1
     fi
 
-    # 定义要执行的 Python 内联命令
-    # 1. 将 APP_DIR 添加到 sys.path, 这样 Python 才能找到 'send' 模块
-    # 2. 导入 NotificationSender
-    # 3. 像 core.py 一样，使用 config_path 初始化它
-    # 4. 发送测试消息
     local PY_COMMAND="import sys; sys.path.append('$APP_DIR'); from send import NotificationSender; print('Initializing NotificationSender...'); sender = NotificationSender('$CONFIG_FILE'); print('Sending test message...'); sender.send_message('ForumMonitor: Test Message\n\nThis is a test of the Pushplus integration from your management script.'); print('Test message sent. Please check your device.')"
     
-    # 在 Python 虚拟环境中执行该命令
     "$VENV_DIR/bin/python" -c "$PY_COMMAND"
+}
+
+run_test_ai() {
+    check_service_exists
+    check_jq
+
+    echo "--- 正在测试 Cloudflare AI 连通性... ---"
+    
+    local CF_TOKEN=$(jq -r '.config.cf_token' "$CONFIG_FILE")
+    local CF_ID=$(jq -r '.config.cf_account_id' "$CONFIG_FILE")
+    
+    if [ -z "$CF_TOKEN" ] || [ "$CF_TOKEN" == "YOUR_CLOUDFLARE_API_TOKEN_HERE" ] || \
+       [ -z "$CF_ID" ] || [ "$CF_ID" == "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE" ]; then
+        echo -e "${RED}错误: Cloudflare Token 或 Account ID 未在配置中设置。${NC}"
+        echo "请先运行 'fm 6' (edit) 来设置它们。"
+        return 1
+    fi
+
+    local TEST_PROMPT="This is a test message, please return FALSE."
+    
+    local PY_COMMAND_SIMPLE="import sys; sys.path.append('$APP_DIR'); from core import ForumMonitor; print('Initializing ForumMonitor and sending test prompt...'); monitor = ForumMonitor(config_path='$CONFIG_FILE'); print(monitor.get_filter_from_ai(\"${TEST_PROMPT}\"))"
+    
+    echo "--- 正在执行 Python AI 测试... ---"
+    
+    set +e
+    local AI_RESPONSE=$("$VENV_DIR/bin/python" -c "$PY_COMMAND_SIMPLE")
+    local EXIT_CODE=$?
+    set -e 
+
+    echo ""
+    echo "--- AI Test Complete ---"
+    echo "Test Input: ${TEST_PROMPT}"
+    
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo -e "${RED}Python 脚本执行失败 (Exit Code $EXIT_CODE)。${NC}"
+        echo "这可能是由于:"
+        echo "1. Python 依赖问题 (尝试 'fm 1' 重装)"
+        echo "2. 'core.py' 文件中的语法错误。"
+        echo "原始响应 (可能为空): ${AI_RESPONSE}"
+    else
+        echo "Raw AI Response: ${AI_RESPONSE}"
+        if [[ "$AI_RESPONSE" == *"FALSE"* ]]; then
+            echo -e "Result: ${GREEN}SUCCESS${NC} (AI 正确处理了提示)"
+        else
+            echo -e "Result: ${YELLOW}WARNING${NC} (AI 未返回 'FALSE')"
+            echo "请检查您的 cf_token, cf_account_id, 或 config.json 中的 'filter_prompt'。"
+        fi
+    fi
+}
+
+# (新) 自我更新功能
+run_update() {
+    # $0 是此脚本的路径 (例如 ./deploy_final.sh 或 /usr/local/bin/fm)
+    # realpath 会找到它的真实物理位置 (例如 /root/deploy_final.sh)
+    local SCRIPT_PATH=$(realpath "$0")
+    local TEMP_PATH="${SCRIPT_PATH}.new"
+    
+    echo "--- 正在从 GitHub 下载最新版本... ---"
+    echo "来源: $UPDATE_URL"
+    
+    if ! curl -s -L "$UPDATE_URL" -o "$TEMP_PATH"; then
+        echo -e "${RED}下载失败。请检查网络连接或 URL。${NC}"
+        rm -f "$TEMP_PATH"
+        return 1
+    fi
+    
+    # 语法检查新脚本
+    if ! bash -n "$TEMP_PATH"; then
+        echo -e "${RED}新脚本语法检查失败。为安全起见，已中止更新。${NC}"
+        rm -f "$TEMP_PATH"
+        return 1
+    fi
+    
+    echo "--- 下载并验证成功。正在应用更新... ---"
+    chmod +x "$TEMP_PATH"
+    # 用新脚本覆盖旧脚本
+    mv "$TEMP_PATH" "$SCRIPT_PATH"
+    
+    echo -e "${GREEN}更新完成！正在重新启动管理菜单...${NC}"
+    sleep 2
+    
+    # 执行新脚本，它将自动显示主菜单
+    exec "$SCRIPT_PATH"
 }
 
 
@@ -307,7 +386,7 @@ class ForumMonitor:
             { "role": "user", "content": description}
         ]
 
-        output = self.workers_ai_run(self.config['model'], inputs) # "@cf/qwen/qwen1.5-14b-chat-awq"
+        output = self.workers_ai_run(self.config['model'], inputs) # "@cf/meta/llama-3-8b-instruct"
         # print(output)
         return output['result']['response'].split('END')[0]
 
@@ -318,8 +397,8 @@ class ForumMonitor:
             { "role": "user", "content": description}
         ]
 
-        output = self.workers_ai_run(self.config['model'], inputs) # "@cf/qwen/qwen1.5-14b-chat-awq"
-        print(output)
+        output = self.workers_ai_run(self.config['model'], inputs) # "@cf/meta/llama-3-8b-instruct"
+        print(f"    [AI 原始响应] {output}") # (新) 打印原始输出
         return output['result']['response'].split('END')[0]
 
 
@@ -348,13 +427,13 @@ class ForumMonitor:
   
                 # 创建消息内容
                 message = (
-                    f"{thread_data['cate'].upper()} 新促销\n"
-                    f"标题：{thread_data['title']}\n"
-                    f"作者：{thread_data['creator']}\n"  # 如果有作者信息，可替换 '未知' 为实际值
-                    f"发布时间：{formatted_pub_date}\n\n"
-                    f"{thread_data['description'][:200]}...\n\n"
-                    f"{summary}\n\n"
-                    f"{thread_data['link']}"
+                    f"{thread_data['cate'].upper()} 新促销\n\n"
+                    f"**标题:** {thread_data['title']}\n"
+                    f"**作者:** {thread_data['creator']}\n"
+                    f"**发布时间:** {formatted_pub_date}\n\n"
+                    f"**内容:** {thread_data['description'][:200]}...\n\n"
+                    f"**AI 摘要:**\n{summary}\n\n"
+                    f"**链接:** {thread_data['link']}"
                 )
 
                 print(f"    [推送] 正在推送新线程: {thread_data['title']}")
@@ -408,20 +487,19 @@ class ForumMonitor:
                 print(f"      [检测到新评论] (作者: {comment_data['author']}) 正在提交给 AI 过滤器...")
                 
                 ai_response = self.get_filter_from_ai(comment_data['message'])
-                print(f"      [AI 响应] {ai_response}")
+                # ai_response 已经在 get_filter_from_ai 中打印
                 
                 if not "FALSE" in ai_response:
                     # 格式化发布时间为所需格式
                     formatted_pub_date = comment_data['created_at'].strftime("%Y/%m/%d %H:%M")
     
-                    # 创建消息内容
+                    # 创建消息内容 (使用 Markdown)
                     message = (
-                        f"{thread_data['cate'].upper()} 新评论\n"
-                        f"作者：{comment_data['author']}\n"  # 如果有作者信息，可替换 '未知' 为实际值
-                        f"发布时间：{formatted_pub_date}\n\n"
-                        f"{comment_data['message'][:200]}...\n"
-                        f"{ai_response[:200]}...\n\n"
-                        f"{comment_data['url']}"
+                        f"{thread_data['cate'].upper()} 新评论 (来自楼主)\n\n"
+                        f"**作者:** {comment_data['author']}\n"
+                        f"**发布时间:** {formatted_pub_date}\n\n"
+                        f"**AI 翻译/摘要:**\n{ai_response[:200]}...\n\n"
+                        f"**链接:** {comment_data['url']}"
                     )
     
                     print(f"      [推送] AI 过滤器通过，正在推送新评论: {comment_data['url']}")
@@ -510,22 +588,26 @@ class ForumMonitor:
     # 监控主循环
     def start_monitoring(self):
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 开始监控...")
+        # (新) 从配置加载 frequency
         frequency = self.config.get('frequency', 600)  # 默认每10分钟检测一次
+        print(f"监控频率: 每 {frequency} 秒检查一次")
         
         debug = True
 
         while True:
             if debug:
-                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 开始遍历...")
+                    print(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 开始遍历...")
                     self.check_let()  # 检查 RSS
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 遍历完成...")
             else:
                 try:
-                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 开始遍历...")
+                    print(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 开始遍历...")
                     self.check_let()  # 检查 RSS
                     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 遍历完成...")
                 except Exception as e:
                     print(f"检测过程出现错误: {e}")
+            
+            print(f"--- 下次检查将在 {frequency} 秒后 ---")
             time.sleep(frequency)
 
     # 外部重载配置方法
@@ -550,7 +632,7 @@ urllib3<2.0
 lxml
 EOF
 
-    # F. 创建 send.py (Pushplus 版本) - (*** V9: 已改进 ***)
+    # F. 创建 send.py (Pushplus 版本)
     echo "--- 正在创建 Pushplus 通知脚本: $APP_DIR/send.py ---"
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
@@ -560,9 +642,13 @@ import os
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# (新) 简单的日志记录器
+def log(message):
+    print(f"[Pushplus] {message}")
+
 class NotificationSender:
     def __init__(self, config_path='data/config.json'):
-        print("通知发送器: 正在初始化 Pushplus (带重试功能)...")
+        log("正在初始化 Pushplus (带重试功能)...")
         self.config_path = config_path
         self.token = ""
         
@@ -584,7 +670,7 @@ class NotificationSender:
         try:
             # 确保配置文件存在
             if not os.path.exists(self.config_path):
-                print(f"警告: {self.config_path} 不存在, 将在 core.py 首次运行时创建。")
+                log(f"警告: {self.config_path} 不存在, 将在 core.py 首次运行时创建。")
                 return
 
             with open(self.config_path, 'r') as f:
@@ -593,16 +679,16 @@ class NotificationSender:
             self.token = config.get('pushplus_token', '')
             
             if not self.token:
-                print("警告: 'pushplus_token' 未在 config.json 中配置，通知将无法发送。")
+                log("警告: 'pushplus_token' 未在 config.json 中配置，通知将无法发送。")
         except Exception as e:
-            print(f"加载 Pushplus 配置失败: {e}")
+            log(f"加载 Pushplus 配置失败: {e}")
 
     def send_message(self, message):
         if not self.token or self.token == "YOUR_PUSHPLUS_TOKEN_HERE":
-            print("错误: Pushplus token 未配置，无法发送。跳过通知。")
-            print("====== [ 虚拟通知 (请检查 config.json) ] ======")
-            print(message)
-            print("==============================================")
+            log("错误: Pushplus token 未配置，无法发送。跳过通知。")
+            log("====== [ 虚拟通知 (请检查 config.json) ] ======")
+            log(message)
+            log("==============================================")
             return
 
         # Pushplus 消息通常需要标题和内容
@@ -615,33 +701,33 @@ class NotificationSender:
             title = "论坛新通知"
             content = message
 
-        # (新) 【修复1】改用 HTTPS 协议
+        # 【修复1】改用 HTTPS 协议
         pushplus_url = "https://www.pushplus.plus/send"
         payload = {
             "token": self.token,
             "title": title,
             "content": content,
-            "template": "markdown" # (新) 【修复4】改用 markdown
+            "template": "markdown" # 【修复4】改用 markdown
         }
         
         try:
-            # (新) 【修复2】使用 session 发送请求，并保持15秒的单次连接超时
+            # 【修复2】使用 session 发送请求，并保持15秒的单次连接超时
             response = self.session.post(pushplus_url, json=payload, timeout=15)
             response.raise_for_status() # 如果发生4xx或5xx错误，则抛出异常
 
             # Pushplus 成功响应 (code 200) 也会在 raise_for_status() 通过
             response_data = response.json()
             if response_data.get('code') == 200:
-                print(f"成功发送通知: {title}")
+                log(f"成功发送通知: {title}")
             else:
-                print(f"Pushplus 通知发送失败 (API 错误): {response_data.get('msg', '未知错误')}")
+                log(f"Pushplus 通知发送失败 (API 错误): {response_data.get('msg', '未知错误')}")
                 
         except requests.exceptions.RequestException as e:
-            # (新) 【修复5】 增强的错误日志
-            print(f"错误：PushPlus 通知发送失败 (已重试3次): {e}")
-            print("排查建议: 1. 检查服务器能否访问外网。 2. 检查服务器防火墙或云服务商安全组是否允许出站HTTPS(443)流量。 3. 在服务器上执行 'curl -v https://www.pushplus.plus/send' 进行测试。")
+            # 【修复5】 增强的错误日志
+            log(f"错误：PushPlus 通知发送失败 (已重试3次): {e}")
+            log("排查建议: 1. 检查服务器能否访问外网。 2. 检查服务器防火墙或云服务商安全组是否允许出站HTTPS(443)流量。 3. 在服务器上执行 'curl -v https://www.pushplus.plus/send' 进行测试。")
         except Exception as e:
-            print(f"发送 Pushplus 通知时出现未知错误: {e}")
+            log(f"发送 Pushplus 通知时出现未知错误: {e}")
 
 EOF
 
@@ -652,13 +738,13 @@ EOF
     read -p "请输入 Cloudflare API Token: " CF_TOKEN
     read -p "请输入 Cloudflare Account ID (32位字符串, 不是邮箱!): " CF_ACCOUNT_ID
     if [ -z "$PUSHPLUS_TOKEN" ] || [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT_ID" ]; then
-      echo "错误：所有字段都必须填写。部署中止。"
+      echo -e "${RED}错误：所有字段都必须填写。部署中止。${NC}"
       exit 1
     fi
     echo "--- 密钥输入完毕 ---"
     echo ""
 
-    # H. 创建 data/config.json
+    # H. 创建 data/config.json (*** V12: 修复 AI 模型 ***)
     echo "--- 正在创建 *实际* 配置文件: $CONFIG_FILE ---"
     cat << EOF > "$CONFIG_FILE"
 {
@@ -666,7 +752,7 @@ EOF
     "pushplus_token": "$PUSHPLUS_TOKEN",
     "cf_token": "$CF_TOKEN",
     "cf_account_id": "$CF_ACCOUNT_ID",
-    "model": "@cf/qwen/qwen1.5-14b-chat-awq",
+    "model": "@cf/meta/llama-3-8b-instruct",
     "thread_prompt": "你是一个中文智能助手，帮助我筛选一个 VPS (Virtual Private Server, 虚拟服务器) 交流论坛的信息。接下来我要给你一条信息，请你用50字简短总结，并用100字介绍其提供的价格最低的套餐（介绍其价格、配置以及对应的优惠码，如果有）。格式为：摘要：xxx\n优惠套餐：xxx",
     "filter_prompt": "你是一个中文智能助手，帮助我筛选一个 VPS (Virtual Private Server, 虚拟服务器) 交流论坛的信息。接下来我要给你一条信息，如果满足筛选规则，请你返回文段翻译，如果文段超过100字，翻译后再进行摘要，如果不满足，则返回 \"FALSE\"。 筛选条件：这条评论需要提供了一个新的优惠活动 discount，或是发起了一组抽奖 giveaway，或是提供了优惠码 code，或是补充了供货 restock，除此之外均返回FALSE。返回格式：内容：XXX 或者 FALSE。",
     "frequency": 600
@@ -674,7 +760,7 @@ EOF
 }
 EOF
 
-    # I. 创建 example.json (作为备份)
+    # I. 创建 example.json (作为备份) (*** V12: 修复 AI 模型 ***)
     echo "--- 正在创建配置文件模板 (用于参考): $APP_DIR/example.json ---"
     cat <<'EOF' > "$APP_DIR/example.json"
 {
@@ -682,7 +768,7 @@ EOF
     "pushplus_token": "YOUR_PUSHPLUS_TOKEN_HERE",
     "cf_token": "YOUR_CLOUDFLARE_API_TOKEN_HERE",
     "cf_account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
-    "model": "@cf/qwen/qwen1.5-14b-chat-awq",
+    "model": "@cf/meta/llama-3-8b-instruct",
     "thread_prompt": "...",
     "filter_prompt": "...",
     "frequency": 600
@@ -764,7 +850,9 @@ show_help() {
     echo -e "${GREEN}  7. frequency  修改脚本遍历时间 (秒)。${NC}"
     echo -e "${GREEN}  8. status     查看服务运行状态。${NC}"
     echo -e "${GREEN}  9. logs       查看脚本实时日志 (按 Ctrl+C 退出)。${NC}"
-    echo -e "${GREEN} 10. test-push  发送一条 Pushplus 测试消息。${NC}"
+    echo -e "${GREEN} 10. test-ai    测试 Cloudflare AI 连通性。${NC}"
+    echo -e "${GREEN} 11. test-push  发送一条 Pushplus 测试消息。${NC}"
+    echo -e "${GREEN} 12. update     从 GitHub 更新此管理脚本。${NC}"
     echo -e "${GREEN}  0. help       显示此帮助信息。${NC}"
     echo -e "${GREEN}  q. quit       退出此菜单。${NC}"
     echo -e "${GREEN}---------------------------------------------------------${NC}"
@@ -775,7 +863,7 @@ show_help() {
 main() {
     # 检查是否以 root 身份运行
     if [ "$EUID" -ne 0 ]; then
-      echo "错误: 此脚本必须以 root 权限运行。"
+      echo -e "${RED}错误: 此脚本必须以 root 权限运行。${NC}"
       exit 1
     fi
 
@@ -795,10 +883,12 @@ main() {
             frequency|7) run_edit_frequency ;;
             status|8) run_status ;;
             logs|9) run_logs ;;
-            test-push|test|10) run_test_push ;;
+            test-ai|ai|10) run_test_ai ;;
+            test-push|test|11) run_test_push ;;
+            update|12) run_update ;;
             help|0) show_help ;;
             *)
-                echo "错误: 未知命令 '$COMMAND'"
+                echo -e "${RED}错误: 未知命令 '$COMMAND'${NC}"
                 show_help
                 exit 1
                 ;;
@@ -862,9 +952,16 @@ main() {
                 echo ""
                 read -n 1 -s -r -p "已退出日志。按任意键返回主菜单..."
                 ;;
-            test-push|test|10)
+            test-ai|ai|10)
+                run_test_ai
+                read -n 1 -s -r -p "AI 测试完成。按任意键返回主菜单..."
+                ;;
+            test-push|test|11)
                 run_test_push
-                read -n 1 -s -r -p "测试完成。按任意键返回主菜单..."
+                read -n 1 -s -r -p "推送测试完成。按任意键返回主菜单..."
+                ;;
+            update|12)
+                run_update # 此函数会使用 exec，因此不会返回
                 ;;
             help|0)
                 # 循环将自动重新显示帮助
@@ -874,7 +971,7 @@ main() {
                 break # 退出 while 循环
                 ;;
             *)
-                echo "错误: 未知命令 '$MENU_COMMAND'"
+                echo -e "${RED}错误: 未知命令 '$MENU_COMMAND'${NC}"
                 sleep 1
                 ;;
         esac
