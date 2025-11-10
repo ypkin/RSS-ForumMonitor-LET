@@ -20,7 +20,7 @@
 #  12. update     从 GitHub 更新此管理脚本 (自动应用更新)。
 #   q. quit       退出菜单 (仅在交互模式下)。
 #
-# --- (c) 2025 - 自动生成 (V17 - 修复安装顺序) ---
+# --- (c) 2025 - 自动生成 (V18 - 修复 Pushplus User-Agent) ---
 
 set -e
 set -u
@@ -285,8 +285,7 @@ run_uninstall() {
     echo "=== 卸载完成。 ==="
 }
 
-# (*** V17 修复 ***)
-# 此函数仅写入 Python 文件和依赖项。
+# (V17) 此函数仅写入 Python 文件和依赖项。
 _write_python_files_and_deps() {
     # D. 创建 Python 脚本 (core.py)
     echo "--- 正在创建/覆盖 Python 主程序: $APP_DIR/$PYTHON_SCRIPT_NAME ---"
@@ -603,7 +602,7 @@ urllib3<2.0
 lxml
 EOF
 
-    # F. 创建 send.py (Pushplus 版本)
+    # F. 创建 send.py (Pushplus 版本) - (*** V18: 修复 User-Agent ***)
     echo "--- 正在创建/覆盖 Pushplus 通知脚本: $APP_DIR/send.py ---"
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
@@ -634,6 +633,10 @@ class NotificationSender:
         
         # (新) 在此处创建带重试策略的 session
         self.session = requests.Session()
+        
+        # (*** V18 修复 ***) 设置一个浏览器 User-Agent 来防止被屏蔽
+        self.session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
+        
         retry_strategy = Retry(
             total=3,  # 总共重试3次
             status_forcelist=[429, 500, 502, 503, 504], # 对这些服务器错误状态码也进行重试
