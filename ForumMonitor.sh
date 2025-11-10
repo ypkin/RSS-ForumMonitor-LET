@@ -20,7 +20,7 @@
 #  12. update     从 GitHub 更新此管理脚本 (自动应用更新)。
 #   q. quit       退出菜单 (仅在交互模式下)。
 #
-# --- (c) 2025 - 自动生成 (V16 - 修复安装逻辑) ---
+# --- (c) 2025 - 自动生成 (V17 - 修复安装顺序) ---
 
 set -e
 set -u
@@ -285,7 +285,7 @@ run_uninstall() {
     echo "=== 卸载完成。 ==="
 }
 
-# (*** V16 修复 ***)
+# (*** V17 修复 ***)
 # 此函数仅写入 Python 文件和依赖项。
 _write_python_files_and_deps() {
     # D. 创建 Python 脚本 (core.py)
@@ -710,10 +710,6 @@ class NotificationSender:
             log(f"发送 Pushplus 通知时出现未知错误: {e}")
 
 EOF
-
-    # G. (新) 检查 Python 依赖
-    echo "--- 正在检查/更新 Python 依赖... ---"
-    "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 }
 
 # (新) 此函数用于 `fm 12 (update)` 之后的自动操作
@@ -723,6 +719,10 @@ run_apply_app_update() {
 
     # 写入 Python 文件
     _write_python_files_and_deps
+    
+    # (V17 修复) 在此处安装/更新依赖
+    echo "--- 正在检查/更新 Python 依赖... ---"
+    "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
     
     # 重启服务
     echo "--- 正在重启服务以应用更新... ---"
@@ -765,7 +765,7 @@ run_install() {
         python3 -m venv "$VENV_DIR"
     fi
     
-    # 始终安装/更新依赖
+    # (V17 修复) 始终在此处安装/更新依赖
     echo "--- 正在安装/更新 Python 依赖库... ---"
     "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
