@@ -770,7 +770,7 @@ run_install() {
     "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 
-    # (*** V14 修复 ***)
+    # (V14 修复)
     # G & H. 检查配置，如果不存在则创建
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${YELLOW}未找到现有的 config.json。将进行首次设置...${NC}"
