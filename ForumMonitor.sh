@@ -20,7 +20,7 @@
 #  12. update     从 GitHub 更新此管理脚本 (自动应用更新)。
 #   q. quit       退出菜单 (仅在交互模式下)。
 #
-# --- (c) 2025 - 自动生成 (V18 - 修复 Bookworm 依赖) ---
+# --- (c) 2025 - 自动生成 (V19 - 修复 Pushplus \n Bug) ---
 
 set -e
 set -u
@@ -31,7 +31,6 @@ VENV_DIR="$APP_DIR/venv"
 SERVICE_NAME="forum-monitor"
 PYTHON_SCRIPT_NAME="core.py"
 SYSTEMD_SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-# (V18) 更新为 7.0 路径
 MONGO_APT_SOURCE="/etc/apt/sources.list.d/mongodb-org-7.0.list"
 MONGO_GPG_KEY="/usr/share/keyrings/mongodb-server-7.0.gpg"
 CONFIG_FILE="$APP_DIR/data/config.json"
@@ -270,15 +269,13 @@ run_uninstall() {
     rm -rf "$APP_DIR"
     
     echo "--- 正在卸载 (purge) mongodb-org... ---"
-    # (V18) 尝试移除所有已知的 mongo 版本
     apt-get purge -y mongodb-org mongodb-org-v6
     
     echo "--- 正在移除 MongoDB apt 源文件... ---"
-    # (V18) 移除新旧两个版本
     rm -f /etc/apt/sources.list.d/mongodb-org-6.0.list
     rm -f /usr/share/keyrings/mongodb-server-6.0.gpg
-    rm -f $MONGO_APT_SOURCE
-    rm -f $MONGO_GPG_KEY
+    rm -f /etc/apt/sources.list.d/mongodb-org.list
+    rm -f /usr/share/keyrings/mongodb-server-7.0.gpg
     
     echo "--- 正在移除快捷方式 $SHORTCUT_PATH... ---"
     rm -f "$SHORTCUT_PATH"
@@ -607,7 +604,7 @@ urllib3<2.0
 lxml
 EOF
 
-    # F. 创建 send.py (Pushplus 版本) - (*** V18: 修复 User-Agent ***)
+    # F. 创建 send.py (Pushplus 版本) - (*** V19: 修复 \n Bug ***)
     echo "--- 正在创建/覆盖 Pushplus 通知脚本: $APP_DIR/send.py ---"
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
@@ -639,7 +636,7 @@ class NotificationSender:
         # (新) 在此处创建带重试策略的 session
         self.session = requests.Session()
         
-        # (*** V18 修复 ***) 设置一个浏览器 User-Agent 来防止被屏蔽
+        # (V18) 设置一个浏览器 User-Agent 来防止被屏蔽
         self.session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
         
         retry_strategy = Retry(
@@ -684,7 +681,8 @@ class NotificationSender:
         try:
             lines = message.split('\n', 1)
             title = lines[0]
-            content = lines[1] if len(lines) > 1 else title
+            # (*** V19 修复 ***) 添加 .strip() 来移除开头的 \n
+            content = (lines[1] if len(lines) > 1 else title).strip()
         except Exception:
             title = "论坛新通知"
             content = message
