@@ -15,10 +15,11 @@
 #   7. frequency  修改脚本遍历时间 (秒)。
 #   8. status     查看服务运行状态。
 #   9. logs       查看脚本实时日志 (按 Ctrl+C 退出)。
+#  10. test-push  发送一条 Pushplus 测试消息。
 #   0. help       显示此帮助信息。
 #   q. quit       退出菜单 (仅在交互模式下)。
 #
-# --- (c) 2025 - 自动生成 (V8 - 增强日志) ---
+# --- (c) 2025 - 自动生成 (V9 - 包含推送测试) ---
 
 set -e
 set -u
@@ -144,7 +145,34 @@ run_logs() {
     echo "--- 正在显示 $SERVICE_NAME 实时日志... ---"
     echo "--- (按 Ctrl+C 退出日志并返回菜单) ---"
     sleep 2
+    # -f = follow (实时)
     journalctl -u $SERVICE_NAME -f
+}
+
+# (新) Pushplus 推送测试
+run_test_push() {
+    check_service_exists
+    check_jq
+
+    echo "--- 正在测试 Pushplus 推送... ---"
+    
+    # 检查 Token 是否已在 config.json 中设置
+    local PUSHPLUS_TOKEN=$(jq -r '.config.pushplus_token' "$CONFIG_FILE")
+    if [ -z "$PUSHPLUS_TOKEN" ] || [ "$PUSHPLUS_TOKEN" == "YOUR_PUSHPLUS_TOKEN_HERE" ]; then
+        echo "错误: Pushplus Token 未在配置中设置。"
+        echo "请先运行 'fm 6' (edit) 来设置 Token。"
+        return 1
+    fi
+
+    # 定义要执行的 Python 内联命令
+    # 1. 将 APP_DIR 添加到 sys.path, 这样 Python 才能找到 'send' 模块
+    # 2. 导入 NotificationSender
+    # 3. 像 core.py 一样，使用 config_path 初始化它
+    # 4. 发送测试消息
+    local PY_COMMAND="import sys; sys.path.append('$APP_DIR'); from send import NotificationSender; print('Initializing NotificationSender...'); sender = NotificationSender('$CONFIG_FILE'); print('Sending test message...'); sender.send_message('ForumMonitor: Test Message\n\nThis is a test of the Pushplus integration from your management script.'); print('Test message sent. Please check your device.')"
+    
+    # 在 Python 虚拟环境中执行该命令
+    "$VENV_DIR/bin/python" -c "$PY_COMMAND"
 }
 
 
@@ -210,7 +238,7 @@ run_install() {
     echo "--- 正在创建应用程序目录: $APP_DIR/data ---"
     mkdir -p "$APP_DIR/data"
 
-    # D. 创建 Python 脚本 (core.py) - (*** V8: 增强日志 ***)
+    # D. 创建 Python 脚本 (core.py)
     echo "--- 正在创建 Python 主程序: $APP_DIR/$PYTHON_SCRIPT_NAME ---"
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -522,18 +550,34 @@ urllib3<2.0
 lxml
 EOF
 
-    # F. 创建 send.py (Pushplus 版本)
+    # F. 创建 send.py (Pushplus 版本) - (*** V9: 已改进 ***)
     echo "--- 正在创建 Pushplus 通知脚本: $APP_DIR/send.py ---"
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
 import requests
 import os
+# (新) 添加重试相关的导入
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 class NotificationSender:
     def __init__(self, config_path='data/config.json'):
-        print("通知发送器: 正在初始化 Pushplus...")
+        print("通知发送器: 正在初始化 Pushplus (带重试功能)...")
         self.config_path = config_path
         self.token = ""
+        
+        # (新) 在此处创建带重试策略的 session
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,  # 总共重试3次
+            status_forcelist=[429, 500, 502, 503, 504], # 对这些服务器错误状态码也进行重试
+            allowed_methods=["POST"],
+            backoff_factor=1  # 每次重试的等待时间会增加 (例如: 1s, 2s, 4s)
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+        
         self.load_config()
 
     def load_config(self):
@@ -571,24 +615,31 @@ class NotificationSender:
             title = "论坛新通知"
             content = message
 
-        pushplus_url = "http://www.pushplus.plus/send"
+        # (新) 【修复1】改用 HTTPS 协议
+        pushplus_url = "https://www.pushplus.plus/send"
         payload = {
             "token": self.token,
             "title": title,
             "content": content,
-            "template": "txt" # 使用纯文本格式
+            "template": "markdown" # (新) 【修复4】改用 markdown
         }
         
         try:
-            response = requests.post(pushplus_url, json=payload)
-            response.raise_for_status() # 如果请求失败 (如 4xx, 5xx), 抛出异常
+            # (新) 【修复2】使用 session 发送请求，并保持15秒的单次连接超时
+            response = self.session.post(pushplus_url, json=payload, timeout=15)
+            response.raise_for_status() # 如果发生4xx或5xx错误，则抛出异常
+
+            # Pushplus 成功响应 (code 200) 也会在 raise_for_status() 通过
             response_data = response.json()
             if response_data.get('code') == 200:
-                print("Pushplus 通知发送成功。")
+                print(f"成功发送通知: {title}")
             else:
-                print(f"Pushplus 通知发送失败: {response_data.get('msg', '未知错误')}")
+                print(f"Pushplus 通知发送失败 (API 错误): {response_data.get('msg', '未知错误')}")
+                
         except requests.exceptions.RequestException as e:
-            print(f"发送 Pushplus 通知时出现网络错误: {e}")
+            # (新) 【修复5】 增强的错误日志
+            print(f"错误：PushPlus 通知发送失败 (已重试3次): {e}")
+            print("排查建议: 1. 检查服务器能否访问外网。 2. 检查服务器防火墙或云服务商安全组是否允许出站HTTPS(443)流量。 3. 在服务器上执行 'curl -v https://www.pushplus.plus/send' 进行测试。")
         except Exception as e:
             print(f"发送 Pushplus 通知时出现未知错误: {e}")
 
@@ -713,6 +764,7 @@ show_help() {
     echo -e "${GREEN}  7. frequency  修改脚本遍历时间 (秒)。${NC}"
     echo -e "${GREEN}  8. status     查看服务运行状态。${NC}"
     echo -e "${GREEN}  9. logs       查看脚本实时日志 (按 Ctrl+C 退出)。${NC}"
+    echo -e "${GREEN} 10. test-push  发送一条 Pushplus 测试消息。${NC}"
     echo -e "${GREEN}  0. help       显示此帮助信息。${NC}"
     echo -e "${GREEN}  q. quit       退出此菜单。${NC}"
     echo -e "${GREEN}---------------------------------------------------------${NC}"
@@ -743,6 +795,7 @@ main() {
             frequency|7) run_edit_frequency ;;
             status|8) run_status ;;
             logs|9) run_logs ;;
+            test-push|test|10) run_test_push ;;
             help|0) show_help ;;
             *)
                 echo "错误: 未知命令 '$COMMAND'"
@@ -808,6 +861,10 @@ main() {
                 # 按 Ctrl+C 退出日志后，将显示此消息
                 echo ""
                 read -n 1 -s -r -p "已退出日志。按任意键返回主菜单..."
+                ;;
+            test-push|test|10)
+                run_test_push
+                read -n 1 -s -r -p "测试完成。按任意键返回主菜单..."
                 ;;
             help|0)
                 # 循环将自动重新显示帮助
