@@ -360,7 +360,13 @@ class ForumMonitor:
 
         output = self.workers_ai_run(self.config['model'], inputs) # "@cf/meta/llama-3-8b-instruct"
         # print(output)
-        return output['result']['response'].split('END')[0]
+        # --- [修复 B] ---
+        try:
+            return output['result']['response'].split('END')[0]
+        except (KeyError, TypeError) as e:
+            print(f"    [AI 错误] AI (summarize) 返回了非预期的格式: {output}")
+            return "AI 摘要失败。" # 出错时，返回一条提示信息
+        # --- [修复 B 结束] ---
 
     # 用AI判断评论是否值得推送
     def get_filter_from_ai(self, description):
@@ -371,7 +377,13 @@ class ForumMonitor:
 
         output = self.workers_ai_run(self.config['model'], inputs) # "@cf/meta/llama-3-8b-instruct"
         print(f"    [AI 原始响应] {output}") # (新) 打印原始输出
-        return output['result']['response'].split('END')[0]
+        # --- [修复 B] ---
+        try:
+            return output['result']['response'].split('END')[0]
+        except (KeyError, TypeError) as e:
+            print(f"    [AI 错误] AI (filter) 返回了非预期的格式: {output}")
+            return "FALSE" # 出错时，默认返回 FALSE
+        # --- [修复 B 结束] ---
 
 
 
@@ -564,7 +576,10 @@ class ForumMonitor:
         frequency = self.config.get('frequency', 600)  # 默认每10分钟检测一次
         print(f"监控频率: 每 {frequency} 秒检查一次")
         
-        debug = True
+        # --- [修复 A] ---
+        # 设为 False 来启用下面的 try...except 错误捕获
+        debug = False 
+        # --- [修复 A 结束] ---
 
         while True:
             if debug:
