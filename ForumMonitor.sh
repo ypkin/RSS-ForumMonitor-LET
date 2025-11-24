@@ -18,7 +18,7 @@
 #  13. test-push  发送一条 Pushplus 测试消息。
 #   q. quit       退出菜单。
 #
-# --- (c) 2025 - 自动生成 (V45 - AI 分析增加区域与支付方式版) ---
+# --- (c) 2025 - 自动生成 (V57 - 智能留存与防屏蔽版) ---
 
 set -e
 set -u
@@ -181,12 +181,11 @@ run_logs() {
 run_test_push() {
     check_service_exists
     check_jq
-    echo "--- 正在发送 V45 模拟通知 (新增区域与支付) ---"
+    echo "--- 正在发送 V57 模拟通知 ---"
     
-    local TITLE="[TEST] Black Friday VPS Deals"
+    local TITLE="[测试] Black Friday VPS Deals"
     local CUR_TIME=$(date "+%Y-%m-%d %H:%M")
     
-    # V45: 模拟含有区域和支付方式的 HTML 内容
     local CONTENT="<h3 style='color:#2E8B57;'>📢 [TEST] Black Friday VPS Deals</h3><div style='font-size:12px;color:#666;margin-bottom:10px;'>👤 作者: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH)</div><div style='border-left:4px solid #4CAF50;padding:8px;background:#f1f8e9;color:#333;margin-bottom:10px;'><b>🤖 AI 深度分析:</b><br><b>优点：</b>价格低廉，NVMe硬盘<br><b>缺点：</b>无工单支持<br><b>适合用途：</b>个人博客，代理<br><b>可用区域：</b>🇺🇸 洛杉矶, 🇩🇪 法兰克福<br><b>支付方式：</b>💳 支付宝, PayPal, USDT<br><b>合适套餐：</b>1C/1G 年付\$10款</div><div style='background:#f9f9f9;padding:10px;border-radius:5px;border:1px solid #eee;'><b style='color:#000;'>📦 精选套餐:</b><br>• 1C/1G/20G | <span style='color:#d9534f;font-weight:bold;'>\$10/yr</span> | <a href='#' style='color:#007bff;'>[下单]</a><br>• 2C/2G/40G | <span style='color:#d9534f;font-weight:bold;'>\$20/yr</span> | <a href='#' style='color:#007bff;'>[下单]</a></div><div style='margin-top:15px;'><a href='https://lowendtalk.com' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;'>👉 查看原帖</a></div>"
     
     local PY_COMMAND="import sys; sys.path.append('$APP_DIR'); from send import NotificationSender; sender=NotificationSender('$CONFIG_FILE'); sender.send_html_message('$TITLE', \"\"\"$CONTENT\"\"\")"
@@ -264,7 +263,7 @@ run_update_config_prompt() {
 }
 
 _write_python_files_and_deps() {
-    echo "--- 正在写入 Python 核心代码 (V45 Regions & Payments) ---"
+    echo "--- 正在写入 Python 核心代码 (V57 Smart Retention) ---"
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
 import time
@@ -310,6 +309,13 @@ class ForumMonitor:
         except Exception as e:
             log(f"Scraper Init Failed: {e}", RED, "❌")
             self.scraper = requests.Session()
+        
+        # V56: Anti-Bot Headers
+        self.scraper.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9'
+        })
 
         try:
             self.threads_collection.create_index('link', unique=True)
@@ -375,14 +381,12 @@ class ForumMonitor:
         existing_thread = self.threads_collection.find_one({'link': thread_data['link']})
         if not existing_thread:
             self.threads_collection.insert_one(thread_data)
-            log(f"[NEW] [{thread_data['creator']}] {thread_data['title']}", GREEN, "🟢")
-            
+            # Summarize & Push if really new (double check for redundancy)
             if (datetime.utcnow() - thread_data['pub_date']).total_seconds() <= 86400:
-                log(f"Summarizing with AI...", YELLOW, "🤖")
+                log(f"AI 正在摘要...", YELLOW, "🤖")
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
                 html_summary = self.markdown_to_html(raw_summary)
                 
-                # 时间转换
                 utc_time = thread_data['pub_date']
                 shanghai_time = utc_time + timedelta(hours=8)
                 time_str = shanghai_time.strftime('%Y-%m-%d %H:%M')
@@ -407,34 +411,81 @@ class ForumMonitor:
             return True 
         return False 
 
+    def get_max_page_from_soup(self, soup):
+        try:
+            pager = soup.find('div', class_='Pager')
+            if not pager: return 1
+            links = pager.find_all('a')
+            pages = []
+            for a in links:
+                txt = a.get_text(strip=True)
+                if txt.isdigit(): pages.append(int(txt))
+            if pages: return max(pages)
+            return 1
+        except: return 1
+
+    def parse_let_comment(self, html_content, thread_data):
+        soup = BeautifulSoup(html_content, 'html.parser')
+        comments = soup.find_all('li', class_='ItemComment')
+        for comment in comments:
+            try:
+                author = comment.find('a', class_='Username').text
+                if author != thread_data['creator']: continue # Only OP replies
+                
+                comment_id = comment['id'].replace('Comment_', '')
+                message = comment.find('div', class_='Message').text.strip()
+                date_str = comment.find('time')['datetime']
+                created_at = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S%z").replace(tzinfo=None)
+                
+                c_data = {
+                    'comment_id': comment_id, 'thread_link': thread_data['link'],
+                    'author': author, 'message': message, 'created_at': created_at,
+                    'url': f"{thread_data['link']}#Comment_{comment_id}"
+                }
+                self.handle_comment(c_data, thread_data)
+            except: pass
+
     def fetch_comments(self, thread_data):
         thread_info = self.threads_collection.find_one({'link': thread_data['link']})
-        last_page = thread_info.get('last_page', 1) if thread_info else 1
-        
+        try: last_page = int(thread_info.get('last_page', 1))
+        except: last_page = 1
+        if last_page < 1: last_page = 1
+
         while True:
-            log(f"   📄 Scanning Page: {last_page}", GRAY)
             page_url = f"{thread_data['link']})/p{last_page}"
             try:
-                resp = self.scraper.get(page_url, timeout=30)
+                # V54: Polite delay to reduce 403 chance
+                time.sleep(1) 
+                
+                resp = self.scraper.get(page_url, timeout=20)
+                
                 if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    max_page = self.get_max_page_from_soup(soup)
+                    log(f"   📄 进度: 第 {last_page} 页 / 共 {max_page} 页", GRAY)
+
                     self.parse_let_comment(resp.text, thread_data)
-                    last_page += 1
-                    time.sleep(2)
+                    
+                    if last_page < max_page:
+                        last_page += 1
+                    else:
+                        self.threads_collection.update_one({'link': thread_data['link']}, {'$set': {'last_page': max_page}})
+                        break
                 else:
-                    self.threads_collection.update_one({'link': thread_data['link']}, {'$set': {'last_page': last_page-1}})
-                    break
-            except Exception as e:
-                log(f"Comment fetch error: {e}", RED, "❌")
+                    # V54: Silent Stop on 403/Error (No logs)
+                    break 
+            except Exception:
+                # V54: Silent Stop on Network Exception
                 break
 
     def handle_comment(self, comment_data, thread_data):
         if not self.comments_collection.find_one({'comment_id': comment_data['comment_id']}):
             self.comments_collection.update_one({'comment_id': comment_data['comment_id']}, {'$set': comment_data}, upsert=True)
-            if (datetime.utcnow() - comment_data['created_at']).total_seconds() <= 86400 and comment_data['author'] == thread_data['creator']:
-                log(f"[NEW COMMENT] OP posted on {thread_data['title']}", YELLOW, "💬")
+            if (datetime.utcnow() - comment_data['created_at']).total_seconds() <= 86400:
+                log(f"[新评论] 楼主在 {thread_data['title']} 回复了", YELLOW, "💬")
                 ai_resp = self.get_filter_from_ai(comment_data['message'])
                 if "FALSE" not in ai_resp:
-                    log(f"Target matched! Pushing...", GREEN, "🚀")
+                    log(f"关键词匹配! 推送中...", GREEN, "🚀")
                     
                     utc_time = comment_data['created_at']
                     shanghai_time = utc_time + timedelta(hours=8)
@@ -449,8 +500,6 @@ class ForumMonitor:
                         f"<div style='margin-top:15px;'><a href='{comment_data['url']}' style='color:#007bff;'>👉 查看回复</a></div>"
                     )
                     self.notifier.send_html_message("楼主新回复提醒", msg_content)
-                else:
-                    pass
 
     def check_let(self, url="https://lowendtalk.com/categories/offers/feed.rss"):
         try:
@@ -467,7 +516,7 @@ class ForumMonitor:
 
     def parse_let(self, rss_feed):
         soup = BeautifulSoup(rss_feed, 'xml')
-        items = soup.find_all('item')[:3]
+        items = soup.find_all('item')
         new_count = 0
         for item in items:
             try:
@@ -479,32 +528,55 @@ class ForumMonitor:
                     if href.startswith('http') and 'lowendtalk.com' not in href and href not in extracted_links:
                         extracted_links.append(href)
                 processed_description = self.html_to_text_with_links(raw_description_html)
+                
+                link = item.find('link').text
+                pub_date = datetime.strptime(item.find('pubDate').text, "%a, %d %b %Y %H:%M:%S +0000")
+                
                 t_data = {
-                    'cate': 'let', 'title': item.find('title').text, 'link': item.find('link').text,
+                    'cate': 'let', 'title': item.find('title').text, 'link': link,
                     'description': processed_description,
-                    'pub_date': datetime.strptime(item.find('pubDate').text, "%a, %d %b %Y %H:%M:%S +0000"),
+                    'pub_date': pub_date,
                     'created_at': datetime.utcnow(), 'creator': item.find('dc:creator').text, 'last_page': 1
                 }
-                log(f"[{t_data['creator']}] {t_data['title']}", CYAN, "🔎")
-                log(f"   🔗 {t_data['link']}", GRAY)
-                log(f"   📅 {t_data['pub_date']}", GRAY)
-                is_new = self.handle_thread(t_data, extracted_links)
-                if is_new: new_count += 1
-                self.fetch_comments(t_data)
-            except: pass
-        if new_count == 0: log(f"Done. No new updates.", GRAY, "✅")
+
+                # --- V57 Core Logic ---
+                
+                # 1. Check if thread is already known
+                is_known_thread = self.threads_collection.find_one({'link': link})
+                thread_age = (datetime.utcnow() - pub_date).total_seconds()
+
+                if is_known_thread:
+                    # Case A: Known thread (Old or New). 
+                    # If it appears in RSS, it's active. Scan for replies.
+                    log(f"[{t_data['creator']}] {t_data['title']} (追踪中...)", CYAN, "🔎")
+                    self.fetch_comments(t_data)
+                    
+                else:
+                    # Case B: Unknown thread.
+                    if thread_age > 86400:
+                        # B1: Stranger is older than 24h -> Ignore (Don't backfill old data)
+                        continue
+                    else:
+                        # B2: Stranger is fresh -> Adopt it!
+                        log(f"[{t_data['creator']}] {t_data['title']} (发现新帖)", GREEN, "🆕")
+                        is_new = self.handle_thread(t_data, extracted_links)
+                        if is_new: new_count += 1
+                        self.fetch_comments(t_data)
+
+            except Exception as e: pass
+        if new_count == 0: log(f"完成。无新内容。", GRAY, "✅")
 
     def start_monitoring(self):
-        log("=== Monitor Started ===", GREEN, "🚀")
+        log("=== 监控服务启动 (V57 Smart Retention) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 600)
         while True:
             print(f"{GRAY}--------------------------------------------------{NC}")
-            log(f"Scanning LET Feed...", BLUE, "🔄")
+            log(f"正在扫描 LET...", BLUE, "🔄")
             try:
                 self.check_let()
-            except Exception as e: log(f"Loop Error: {e}", RED, "❌")
+            except Exception as e: log(f"循环错误: {e}", RED, "❌")
             self.update_heartbeat()
-            log(f"Sleeping {freq}s...", GRAY, "😴")
+            log(f"休眠 {freq}秒...", GRAY, "😴")
             time.sleep(freq)
 
 if __name__ == "__main__":
@@ -606,7 +678,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    echo "=== 部署 ForumMonitor (V45) ==="
+    echo "=== 部署 ForumMonitor (V57) ==="
     apt-get update
     apt-get install -y python3 python3-pip python3-venv nodejs jq curl gnupg lsb-release
 
@@ -677,7 +749,7 @@ EOF
 show_menu() {
     clear
     show_dashboard
-    echo -e "${GREEN} ForumMonitor Manager (V45)${NC}"
+    echo -e "${GREEN} ForumMonitor Manager (V57)${NC}"
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
     
     echo -e "${CYAN} [基础管理]${NC}"
