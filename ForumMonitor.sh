@@ -18,7 +18,7 @@
 #  13. test-push  发送一条 Pushplus 测试消息。
 #   q. quit       退出菜单。
 #
-# --- (c) 2025 - 自动生成 (V57 - 智能留存与防屏蔽版) ---
+# --- (c) 2025 - 自动生成 (V76 - 美化日志排版版) ---
 
 set -e
 set -u
@@ -181,12 +181,12 @@ run_logs() {
 run_test_push() {
     check_service_exists
     check_jq
-    echo "--- 正在发送 V57 模拟通知 ---"
+    echo "--- 正在发送 V76 模拟通知 ---"
     
     local TITLE="[测试] Black Friday VPS Deals"
     local CUR_TIME=$(date "+%Y-%m-%d %H:%M")
     
-    local CONTENT="<h3 style='color:#2E8B57;'>📢 [TEST] Black Friday VPS Deals</h3><div style='font-size:12px;color:#666;margin-bottom:10px;'>👤 作者: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH)</div><div style='border-left:4px solid #4CAF50;padding:8px;background:#f1f8e9;color:#333;margin-bottom:10px;'><b>🤖 AI 深度分析:</b><br><b>优点：</b>价格低廉，NVMe硬盘<br><b>缺点：</b>无工单支持<br><b>适合用途：</b>个人博客，代理<br><b>可用区域：</b>🇺🇸 洛杉矶, 🇩🇪 法兰克福<br><b>支付方式：</b>💳 支付宝, PayPal, USDT<br><b>合适套餐：</b>1C/1G 年付\$10款</div><div style='background:#f9f9f9;padding:10px;border-radius:5px;border:1px solid #eee;'><b style='color:#000;'>📦 精选套餐:</b><br>• 1C/1G/20G | <span style='color:#d9534f;font-weight:bold;'>\$10/yr</span> | <a href='#' style='color:#007bff;'>[下单]</a><br>• 2C/2G/40G | <span style='color:#d9534f;font-weight:bold;'>\$20/yr</span> | <a href='#' style='color:#007bff;'>[下单]</a></div><div style='margin-top:15px;'><a href='https://lowendtalk.com' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;'>👉 查看原帖</a></div>"
+    local CONTENT="<h3 style='color:#2E8B57;'>📢 [TEST] Black Friday VPS Deals</h3><div style='font-size:12px;color:#666;margin-bottom:15px;'>👤 Author: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH)</div><div style='font-size:14px;line-height:1.6;color:#333;'><b>VPS：</b><br>• Xeon Gold 5115: 10C/192G/2x1.2TB SAS/10Gbps 不限流量/1 IPv4 → \$119.40/月 [ORDER_LINK_HERE]<br>• Xeon Gold 5115: 10C/192G/12x8TB SAS + 2x240GB SSD/10Gbps 不限流量/1 IPv4 → \$208.80/月<br><br><b>限时福利：</b><br>• 优惠码 BLACKFRIDAY 享循环6折优惠（40% OFF）。<br>• 首月额外5折。<br><br>🟢 优点: 10Gbps不限流量; 硬件配置高<br>🔴 缺点: 价格门槛高; 仅单个IPv4; 升级不续优惠<br>🎯 适合: 高性能计算用户。</div><div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='https://lowendtalk.com' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
     
     local PY_COMMAND="import sys; sys.path.append('$APP_DIR'); from send import NotificationSender; sender=NotificationSender('$CONFIG_FILE'); sender.send_html_message('$TITLE', \"\"\"$CONTENT\"\"\")"
     
@@ -197,12 +197,12 @@ run_test_ai() {
     check_service_exists
     check_jq
     echo "--- 测试 AI ---"
-    local CMD="import sys; sys.path.append('$APP_DIR'); from core import ForumMonitor; print(ForumMonitor(config_path='$CONFIG_FILE').get_filter_from_ai(\"Test msg return FALSE\"))"
+    local CMD="import sys; sys.path.append('$APP_DIR'); from core import ForumMonitor; print(ForumMonitor(config_path='$CONFIG_FILE').get_filter_from_ai(\"This is a test message.\"))"
     set +e
     local RES=$("$VENV_DIR/bin/python" -c "$CMD")
     set -e
     echo "AI Response: $RES"
-    [[ "$RES" == *"FALSE"* ]] && echo -e "${GREEN}AI 正常${NC}" || echo -e "${YELLOW}AI 异常${NC}"
+    [[ "$RES" == *"FALSE"* ]] && echo -e "${YELLOW}AI 拦截 (符合预期 if test is garbage)${NC}" || echo -e "${GREEN}AI 通过 (中文摘要)${NC}"
 }
 
 run_update() {
@@ -254,22 +254,26 @@ run_uninstall() {
     echo "=== 完成 ==="
 }
 
-# V45: 更新 Prompt 增加可用区域和支付方式
+# V75: 更新 Prompt 嵌入链接占位符
 run_update_config_prompt() {
     if [ -f "$CONFIG_FILE" ]; then
-        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，按以下格式输出分析：\n优点：xxx\n缺点：xxx\n适合用途：xxx\n可用区域：xxx\n支付方式：xxx\n合适套餐：(推荐一款)\n\n然后列出**所有**提到的 VPS 套餐。请**务必**将该套餐的购买链接(如有)放在对应行的末尾。格式：\n📦 套餐列表：\n- <配置> | <价格> | <优惠码> | [购买链接](URL)"
-        jq --arg p "$NEW_THREAD_PROMPT" '.config.thread_prompt = $p' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        local NEW_FILTER_PROMPT="你是一个中文辅助助手。请用**中文**简要总结这条回复的内容。如果回复内容是无意义的（如纯表情、'谢谢'、'已买'、'顶贴'、'Up'）或与VPS服务无关，请直接回复 FALSE。否则，请输出简短的中文摘要。"
+
+        jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
+           '.config.thread_prompt = $p | .config.filter_prompt = $f' \
+           "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     fi
 }
 
 _write_python_files_and_deps() {
-    echo "--- 正在写入 Python 核心代码 (V57 Smart Retention) ---"
+    echo "--- 正在写入 Python 核心代码 (V76 Log/Link Fix) ---"
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
 import time
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from send import NotificationSender
 import os
 from pymongo import MongoClient
@@ -286,9 +290,13 @@ CYAN = '\033[0;36m'
 BLUE = '\033[0;34m'
 NC = '\033[0m'
 GRAY = '\033[0;90m'
+WHITE = '\033[1;37m'
+
+# Define Shanghai Timezone (UTC+8)
+SHANGHAI = timezone(timedelta(hours=8))
 
 def log(msg, color=NC, icon=""):
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    timestamp = datetime.now(SHANGHAI).strftime("%H:%M:%S")
     prefix = f"{icon} " if icon else ""
     print(f"{GRAY}[{timestamp}]{NC} {color}{prefix}{msg}{NC}")
 
@@ -310,7 +318,6 @@ class ForumMonitor:
             log(f"Scraper Init Failed: {e}", RED, "❌")
             self.scraper = requests.Session()
         
-        # V56: Anti-Bot Headers
         self.scraper.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -349,7 +356,7 @@ class ForumMonitor:
                 headers=headers, json=input, timeout=30)
             return response.json()
         except Exception as e:
-            log(f"AI Request failed: {e}", RED, "⚠️")
+            log(f"AI 请求失败: {e}", RED, "⚠️")
             return {"result": {"response": "FALSE"}}
 
     def get_summarize_from_ai(self, description):
@@ -359,7 +366,7 @@ class ForumMonitor:
         ]
         output = self.workers_ai_run(self.config['model'], inputs)
         try: return output['result']['response'].split('END')[0]
-        except: return "AI 摘要失败。"
+        except: return "AI 摘要生成失败。"
 
     def get_filter_from_ai(self, description):
         inputs = [
@@ -373,7 +380,10 @@ class ForumMonitor:
     def markdown_to_html(self, text):
         text = text.replace("<", "&lt;").replace(">", "&gt;")
         text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-        text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color:#007bff;text-decoration:none;">\1</a>', text)
+        text = text.replace('VPS：', '<b>VPS：</b>')
+        text = text.replace('限时福利：', '<b>限时福利：</b>')
+        text = text.replace('基础设施：', '<b>基础设施：</b>')
+        text = text.replace('支付方式：', '<b>支付方式：</b>')
         text = text.replace('\n', '<br>')
         return text
 
@@ -381,31 +391,38 @@ class ForumMonitor:
         existing_thread = self.threads_collection.find_one({'link': thread_data['link']})
         if not existing_thread:
             self.threads_collection.insert_one(thread_data)
-            # Summarize & Push if really new (double check for redundancy)
-            if (datetime.utcnow() - thread_data['pub_date']).total_seconds() <= 86400:
+            # V74: Beautified two-line log
+            log(f"{WHITE}@{thread_data['creator']} {CYAN}{thread_data['title']}{NC}\n           {GRAY}└─ {thread_data['link']}", GREEN, "🟢")
+            
+            now_sh = datetime.now(SHANGHAI)
+            pub_date_sh = thread_data['pub_date'].astimezone(SHANGHAI)
+
+            if (now_sh - pub_date_sh).total_seconds() <= 86400:
                 log(f"AI 正在摘要...", YELLOW, "🤖")
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
+                
+                # V75: Inject the first extracted link into the summary
+                link_html = ''
+                if extracted_links:
+                    # Use the first extracted link
+                    link_html = f' <a href="{extracted_links[0]}" style="color:#007bff;font-weight:bold;">[下单地址]</a>'
+                    # Replace the placeholder in the raw summary text
+                    raw_summary = raw_summary.replace("[ORDER_LINK_HERE]", link_html, 1)
+
                 html_summary = self.markdown_to_html(raw_summary)
                 
-                utc_time = thread_data['pub_date']
-                shanghai_time = utc_time + timedelta(hours=8)
-                time_str = shanghai_time.strftime('%Y-%m-%d %H:%M')
+                time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
                 
-                links_html = ""
-                if extracted_links:
-                    links_list = "".join([f"• <a href='{link}' style='color:#007bff;'>{link[:30]}...</a><br>" for link in extracted_links[:5]])
-                    links_html = f"<div style='margin-top:10px;font-size:12px;'>🔗 <b>其他检测链接:</b><br>{links_list}</div>"
-
+                # V73: Classic Header + V72 Body + Classic Button
                 msg_content = (
                     f"<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>{thread_data['title']}</h4>"
                     f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
-                    f"👤 作者: {thread_data['creator']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str}"
+                    f"👤 Author: {thread_data['creator']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH)"
                     f"</div>"
-                    
-                    f"<div style='border-left:4px solid #4CAF50;padding:8px;background:#f1f8e9;color:#333;margin-bottom:10px;font-size:14px;line-height:1.5;'>"
-                    f"<b>🤖 AI 深度分析 & 套餐:</b><br>{html_summary}</div>"
-                    f"{links_html}"
-                    f"<div style='margin-top:15px;'><a href='{thread_data['link']}' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
+                    f"<div style='font-size:14px;line-height:1.6;color:#333;'>"
+                    f"{html_summary}"
+                    f"</div>"
+                    f"<div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='{thread_data['link']}' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
                 )
                 self.notifier.send_html_message(thread_data['title'], msg_content)
             return True 
@@ -427,25 +444,33 @@ class ForumMonitor:
     def parse_let_comment(self, html_content, thread_data):
         soup = BeautifulSoup(html_content, 'html.parser')
         comments = soup.find_all('li', class_='ItemComment')
+        
+        now_sh = datetime.now(SHANGHAI)
+
         for comment in comments:
             try:
+                date_str = comment.find('time')['datetime']
+                created_at_aware = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S%z")
+                created_at_sh = created_at_aware.astimezone(SHANGHAI)
+                
+                if (now_sh - created_at_sh).total_seconds() > 86400:
+                    continue 
+
                 author = comment.find('a', class_='Username').text
-                if author != thread_data['creator']: continue # Only OP replies
+                if author != thread_data['creator']: continue 
                 
                 comment_id = comment['id'].replace('Comment_', '')
                 message = comment.find('div', class_='Message').text.strip()
-                date_str = comment.find('time')['datetime']
-                created_at = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S%z").replace(tzinfo=None)
                 
                 c_data = {
                     'comment_id': comment_id, 'thread_link': thread_data['link'],
-                    'author': author, 'message': message, 'created_at': created_at,
+                    'author': author, 'message': message, 'created_at': created_at_aware, 
                     'url': f"{thread_data['link']}#Comment_{comment_id}"
                 }
-                self.handle_comment(c_data, thread_data)
+                self.handle_comment(c_data, thread_data, created_at_sh)
             except: pass
 
-    def fetch_comments(self, thread_data):
+    def fetch_comments(self, thread_data, silent=False):
         thread_info = self.threads_collection.find_one({'link': thread_data['link']})
         try: last_page = int(thread_info.get('last_page', 1))
         except: last_page = 1
@@ -454,15 +479,15 @@ class ForumMonitor:
         while True:
             page_url = f"{thread_data['link']})/p{last_page}"
             try:
-                # V54: Polite delay to reduce 403 chance
                 time.sleep(1) 
-                
                 resp = self.scraper.get(page_url, timeout=20)
                 
                 if resp.status_code == 200:
                     soup = BeautifulSoup(resp.text, 'html.parser')
                     max_page = self.get_max_page_from_soup(soup)
-                    log(f"   📄 进度: 第 {last_page} 页 / 共 {max_page} 页", GRAY)
+                    
+                    if not silent:
+                        log(f"   📄 [进度] 第 {last_page} 页 / 共 {max_page} 页", GRAY)
 
                     self.parse_let_comment(resp.text, thread_data)
                     
@@ -472,34 +497,31 @@ class ForumMonitor:
                         self.threads_collection.update_one({'link': thread_data['link']}, {'$set': {'last_page': max_page}})
                         break
                 else:
-                    # V54: Silent Stop on 403/Error (No logs)
                     break 
             except Exception:
-                # V54: Silent Stop on Network Exception
                 break
 
-    def handle_comment(self, comment_data, thread_data):
+    def handle_comment(self, comment_data, thread_data, created_at_sh):
         if not self.comments_collection.find_one({'comment_id': comment_data['comment_id']}):
             self.comments_collection.update_one({'comment_id': comment_data['comment_id']}, {'$set': comment_data}, upsert=True)
-            if (datetime.utcnow() - comment_data['created_at']).total_seconds() <= 86400:
-                log(f"[新评论] 楼主在 {thread_data['title']} 回复了", YELLOW, "💬")
-                ai_resp = self.get_filter_from_ai(comment_data['message'])
-                if "FALSE" not in ai_resp:
-                    log(f"关键词匹配! 推送中...", GREEN, "🚀")
-                    
-                    utc_time = comment_data['created_at']
-                    shanghai_time = utc_time + timedelta(hours=8)
-                    time_str = shanghai_time.strftime('%Y-%m-%d %H:%M')
+            
+            log(f"   ✅ [新回复] {comment_data['author']} (活跃中...)", GREEN)
+            
+            ai_resp = self.get_filter_from_ai(comment_data['message'])
+            if "FALSE" not in ai_resp:
+                log(f"      🚀 关键词匹配! 推送中...", GREEN)
+                
+                time_str = created_at_sh.strftime('%Y-%m-%d %H:%M')
 
-                    msg_content = (
-                        f"<h4 style='color:#007bff;margin-bottom:5px;'>💬 楼主新回复</h4>"
-                        f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
-                        f"📌 来源: {thread_data['title']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str}"
-                        f"</div>"
-                        f"<div style='background:#f8f9fa;padding:10px;border:1px solid #eee;border-radius:5px;color:#333;'><b>AI 分析:</b><br>{ai_resp}</div>"
-                        f"<div style='margin-top:15px;'><a href='{comment_data['url']}' style='color:#007bff;'>👉 查看回复</a></div>"
-                    )
-                    self.notifier.send_html_message("楼主新回复提醒", msg_content)
+                msg_content = (
+                    f"<h4 style='color:#007bff;margin-bottom:5px;'>💬 楼主新回复</h4>"
+                    f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
+                    f"📌 Source: {thread_data['title']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH)"
+                    f"</div>"
+                    f"<div style='background:#f8f9fa;padding:10px;border:1px solid #eee;border-radius:5px;color:#333;'><b>🤖 AI 分析:</b><br>{ai_resp}</div>"
+                    f"<div style='margin-top:15px;'><a href='{comment_data['url']}' style='color:#007bff;'>👉 查看回复</a></div>"
+                )
+                self.notifier.send_html_message("楼主新回复提醒", msg_content)
 
     def check_let(self, url="https://lowendtalk.com/categories/offers/feed.rss"):
         try:
@@ -530,44 +552,42 @@ class ForumMonitor:
                 processed_description = self.html_to_text_with_links(raw_description_html)
                 
                 link = item.find('link').text
-                pub_date = datetime.strptime(item.find('pubDate').text, "%a, %d %b %Y %H:%M:%S +0000")
+                pub_date_str = item.find('pubDate').text
+                pub_date_aware = datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S %z")
                 
                 t_data = {
                     'cate': 'let', 'title': item.find('title').text, 'link': link,
                     'description': processed_description,
-                    'pub_date': pub_date,
+                    'pub_date': pub_date_aware, 
                     'created_at': datetime.utcnow(), 'creator': item.find('dc:creator').text, 'last_page': 1
                 }
 
-                # --- V57 Core Logic ---
-                
-                # 1. Check if thread is already known
+                now_sh = datetime.now(SHANGHAI)
+                pub_date_sh = pub_date_aware.astimezone(SHANGHAI)
+                thread_age = (now_sh - pub_date_sh).total_seconds()
+
                 is_known_thread = self.threads_collection.find_one({'link': link})
-                thread_age = (datetime.utcnow() - pub_date).total_seconds()
 
                 if is_known_thread:
-                    # Case A: Known thread (Old or New). 
-                    # If it appears in RSS, it's active. Scan for replies.
-                    log(f"[{t_data['creator']}] {t_data['title']} (追踪中...)", CYAN, "🔎")
-                    self.fetch_comments(t_data)
-                    
-                else:
-                    # Case B: Unknown thread.
-                    if thread_age > 86400:
-                        # B1: Stranger is older than 24h -> Ignore (Don't backfill old data)
-                        continue
+                    if thread_age <= 86400:
+                        log(f"{WHITE}@{t_data['creator']} {CYAN}{t_data['title']}{NC}\n           {GRAY}└─ {link}", CYAN, "🔎")
+                        self.fetch_comments(t_data, silent=False)
                     else:
-                        # B2: Stranger is fresh -> Adopt it!
-                        log(f"[{t_data['creator']}] {t_data['title']} (发现新帖)", GREEN, "🆕")
+                        self.fetch_comments(t_data, silent=True)
+                else:
+                    if thread_age > 86400:
+                        self.threads_collection.insert_one(t_data) 
+                        self.fetch_comments(t_data, silent=True)
+                    else:
                         is_new = self.handle_thread(t_data, extracted_links)
                         if is_new: new_count += 1
-                        self.fetch_comments(t_data)
+                        self.fetch_comments(t_data, silent=False)
 
             except Exception as e: pass
         if new_count == 0: log(f"完成。无新内容。", GRAY, "✅")
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (V57 Smart Retention) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (V75 Link Injection) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 600)
         while True:
             print(f"{GRAY}--------------------------------------------------{NC}")
@@ -678,7 +698,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    echo "=== 部署 ForumMonitor (V57) ==="
+    echo "=== 部署 ForumMonitor (V75) ==="
     apt-get update
     apt-get install -y python3 python3-pip python3-venv nodejs jq curl gnupg lsb-release
 
@@ -702,7 +722,7 @@ run_install() {
 
     if [ ! -f "$CONFIG_FILE" ]; then
         read -p "Pushplus Token: " PT; read -p "CF Token: " CT; read -p "CF Account ID: " CID
-        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，按以下格式输出分析：\n优点：xxx\n缺点：xxx\n适合用途：xxx\n可用区域：xxx\n支付方式：xxx\n合适套餐：(推荐一款)\n\n然后列出**所有**提到的 VPS 套餐。请**务必**将该套餐的购买链接(如有)放在对应行的末尾。格式：\n📦 套餐列表：\n- <配置> | <价格> | <优惠码> | [购买链接](URL)"
+        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         jq -n --arg pt "$PT" --arg ct "$CT" --arg cid "$CID" --arg prompt "$PROMPT" \
            '{config: {pushplus_token: $pt, cf_token: $ct, cf_account_id: $cid, model: "@cf/meta/llama-3-8b-instruct", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600}}' > "$CONFIG_FILE"
     else
@@ -749,7 +769,7 @@ EOF
 show_menu() {
     clear
     show_dashboard
-    echo -e "${GREEN} ForumMonitor Manager (V57)${NC}"
+    echo -e "${GREEN} ForumMonitor Manager (V75)${NC}"
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
     
     echo -e "${CYAN} [基础管理]${NC}"
