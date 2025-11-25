@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (优化版) ---
+# --- ForumMonitor 管理脚本 (排版优化版) ---
 # Environment: Debian 11/12
-# Features: Gemini 2.5 Pro, MongoDB, Pushplus, Systemd
+# Features: Gemini 2.5 Pro, MongoDB, Pushplus, Systemd, Layout Fix
 #
 # Commands:
-#   1. install    安装/重装服务
+#   1. install    安装/重装服务 (会应用代码修复)
 #   2. uninstall  卸载服务
 #   3. update     更新脚本
 #   4. start      启动服务
@@ -19,7 +19,7 @@
 #  12. test-ai    测试 AI 连通性
 #  13. test-push  测试消息推送
 #
-# --- (c) 2025 - Optimized Edition ---
+# --- (c) 2025 - Layout Fixed Edition ---
 
 set -e
 set -u
@@ -109,7 +109,7 @@ show_dashboard() {
     [ -f "$CONFIG_FILE" ] && CUR_MODEL=$(jq -r '.config.model // "gemini-2.5-pro"' "$CONFIG_FILE")
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor 管理面板 (Gemini 2.5 Pro Optimized)${NC}"
+    echo -e " ${CYAN}ForumMonitor 管理面板 (Layout Optimized)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
@@ -205,7 +205,8 @@ run_test_push() {
     local CUR_TIME=$(date "+%Y-%m-%d %H:%M")
     local MODEL=$(jq -r '.config.model // "gemini-2.5-pro"' "$CONFIG_FILE")
     
-    local CONTENT="<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>📢 [TEST] Example VPS Offer</h4><div style='font-size:12px;color:#666;margin-bottom:10px;'>👤 Author: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🧠 $MODEL</div><div style='font-size:14px;line-height:1.6;color:#333;'><b>VPS：</b><br>• Example Plan: 2C/4G/60G SSD/1Gbps → \$5.00/mo <a href='https://google.com' style='color:#007bff;font-weight:bold;'>[下单地址]</a><br><br><b>限时福利：</b><br>• 优惠码 TEST_CODE 享终身 5 折。<br><br><b>基础设施：</b><br>• 洛杉矶 (LA) | CN2 GIA | 1 IPv4 + /64 IPv6<br><br><b>支付方式：</b><br>• PayPal, Alipay, Crypto<br><br>🟢 优点: 线路优质，价格低廉。<br>🔴 缺点: 流量较少，不仅工单。<br>🎯 适合: 建站与个人学习用户。</div><div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='https://google.com' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
+    # 这里的测试内容模拟新的排版格式
+    local CONTENT="<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>📢 [TEST] Example VPS Offer</h4><div style='font-size:12px;color:#666;margin-bottom:10px;'>👤 Author: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🧠 $MODEL</div><div style='font-size:14px;line-height:1.6;color:#333;'><b>VPS：</b><br>• <b>Example Plan</b> → \$5.00/mo <a href='https://google.com' style='color:#007bff;font-weight:bold;'>[下单地址]</a><br>&nbsp;&nbsp;&nbsp;└ 2C / 4G / 60G SSD / 1Gbps<br><br><b>限时福利：</b><br>• 优惠码 TEST_CODE 享终身 5 折。<br><br><b>基础设施：</b><br>• 洛杉矶 (LA) | CN2 GIA | 1 IPv4 + /64 IPv6<br><br><b>支付方式：</b><br>• PayPal, Alipay, Crypto<br><br>🟢 优点: 线路优质，价格低廉。<br>🔴 缺点: 流量较少，不仅工单。<br>🎯 适合: 建站与个人学习用户。</div><div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='https://google.com' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
     
     local PY_COMMAND="import sys; sys.path.append('$APP_DIR'); from send import NotificationSender; sender=NotificationSender('$CONFIG_FILE'); sender.send_html_message('$TITLE', \"\"\"$CONTENT\"\"\")"
     
@@ -291,7 +292,8 @@ run_uninstall() {
 # 辅助: 更新配置中的 Prompt (不覆盖 Key)
 run_update_config_prompt() {
     if [ -f "$CONFIG_FILE" ]; then
-        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        # UPDATE: 使用了新的双行排版 Prompt
+        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐的价格后面。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         local NEW_FILTER_PROMPT="你是一个中文辅助助手。请用**中文**简要总结这条回复的内容。如果回复内容是无意义的（如纯表情、'谢谢'、'已买'、'顶贴'、'Up'）或与VPS服务无关，请直接回复 FALSE。否则，请输出简短的中文摘要。"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
@@ -302,8 +304,9 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python) ---
 # 包含：Gemini 2.5 Pro 支持, Title 前缀, Test 前缀, Model 显示
+# FIX: 修复了 handle_thread 中链接注入的顺序，防止 HTML 被转义
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码..."
+    msg_info "写入 Python 核心代码 (With Fixes)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -453,13 +456,15 @@ class ForumMonitor:
                 log(f"Gemini 正在摘要...", YELLOW, "🤖")
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
                 
-                # Link Injection
-                link_html = ''
+                # --- FIX: 先转 HTML，再插入链接，防止链接标签被转义 ---
+                html_summary = self.markdown_to_html(raw_summary)
+                
                 if extracted_links:
                     link_html = f' <a href="{extracted_links[0]}" style="color:#007bff;font-weight:bold;">[下单地址]</a>'
-                    raw_summary = raw_summary.replace("[ORDER_LINK_HERE]", link_html, 1)
+                    # 将占位符替换为真实链接 (注意：这里替换的是 html_summary)
+                    html_summary = html_summary.replace("[ORDER_LINK_HERE]", link_html, 1)
+                # ---------------------------------------------------
 
-                html_summary = self.markdown_to_html(raw_summary)
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
                 
                 model_name = self.config.get('model', 'Unknown')
@@ -799,7 +804,8 @@ run_install() {
     if [ ! -f "$CONFIG_FILE" ]; then
         read -p "请输入 Pushplus Token: " PT
         read -p "请输入 Gemini API Key: " GK
-        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        # UPDATE: 新安装时使用双行排版 Prompt
+        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐的价格后面。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
         jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" \
            '{config: {pushplus_token: $pt, gemini_api_key: $gk, model: "gemini-2.5-pro", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600}}' > "$CONFIG_FILE"
