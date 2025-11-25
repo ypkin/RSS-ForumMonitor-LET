@@ -27,7 +27,7 @@
 
 ```bash
 # 下载脚本
-curl -Lo ForumMonitor.sh https://raw.githubusercontent.com/ypkin/ForumMonitor-LET/refs/heads/main/ForumMonitor.sh # 假设的下载地址
+curl -Lo ForumMonitor.sh https://raw.githubusercontent.com/ypkin/RSS-ForumMonitor-LET/refs/heads/main/ForumMonitor.sh # 假设的下载地址
 # 赋予执行权限
 chmod +x ForumMonitor.sh
 ```
@@ -47,9 +47,8 @@ chmod +x ForumMonitor.sh
 执行安装脚本。脚本将自动安装 MongoDB、Python 环境、创建服务文件并提示您输入上述参数。
 
 ```bash
-sudo ./ForumMonitor.sh install
-# 或使用快捷方式 (推荐)
-sudo ./ForumMonitor.sh 1
+ ./ForumMonitor.sh
+
 ```
 
 在安装过程中，按照提示输入您的 `Pushplus Token`、`CF Token` 和 `CF Account ID`。服务安装成功后将自动启动。
