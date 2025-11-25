@@ -183,10 +183,11 @@ run_test_push() {
     check_jq
     echo "--- 正在发送 V76 模拟通知 ---"
     
-    local TITLE="[测试] Black Friday VPS Deals"
+    local TITLE="[LET新促销] Black Friday VPS Deals"
     local CUR_TIME=$(date "+%Y-%m-%d %H:%M")
+    local ORDER_LINK="https://example.com/order_link_test"
     
-    local CONTENT="<h3 style='color:#2E8B57;'>📢 [TEST] Black Friday VPS Deals</h3><div style='font-size:12px;color:#666;margin-bottom:15px;'>👤 Author: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH)</div><div style='font-size:14px;line-height:1.6;color:#333;'><b>VPS：</b><br>• Xeon Gold 5115: 10C/192G/2x1.2TB SAS/10Gbps 不限流量/1 IPv4 → \$119.40/月 [ORDER_LINK_HERE]<br>• Xeon Gold 5115: 10C/192G/12x8TB SAS + 2x240GB SSD/10Gbps 不限流量/1 IPv4 → \$208.80/月<br><br><b>限时福利：</b><br>• 优惠码 BLACKFRIDAY 享循环6折优惠（40% OFF）。<br>• 首月额外5折。<br><br>🟢 优点: 10Gbps不限流量; 硬件配置高<br>🔴 缺点: 价格门槛高; 仅单个IPv4; 升级不续优惠<br>🎯 适合: 高性能计算用户。</div><div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='https://lowendtalk.com' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
+    local CONTENT="<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>Black Friday VPS Deals</h4><div style='font-size:12px;color:#666;margin-bottom:10px;'>👤 Author: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH)</div><div style='font-size:14px;line-height:1.6;color:#333;'><b>VPS：</b><br>• Xeon Gold 5115: 10C/192G/2x1.2TB SAS/10Gbps 不限流量/1 IPv4 → \$119.40/月 <a href='$ORDER_LINK' style='color:#007bff;font-weight:bold;'>[下单地址]</a><br>• Xeon Gold 5115: 10C/192G/12x8TB SAS + 2x240GB SSD/10Gbps 不限流量/1 IPv4 → \$208.80/月<br><br><b>限时福利：</b><br>• 优惠码 BLACKFRIDAY 享循环6折优惠（40% OFF）。<br>• 首月额外5折。<br><br><b>基础设施：</b><br>• 美国 洛杉矶 | IPv4 Only | 10Gbps带宽<br><br><b>支付方式：</b><br>• 支付宝、信用卡、PayPal<br><br>🟢 优点: 10Gbps不限流量; 硬件配置高<br>🔴 缺点: 价格门槛高; 仅单个IPv4; 升级不续优惠<br>🎯 适合: 高性能计算用户。<br><br><b>简要概括：</b><br>本次黑五促销提供高性能独立服务器和高配大硬盘 VPS，折扣力度较大。<br><br><b>合适套餐推荐：</b><br>推荐选择\$119.40/月的套餐，配置和带宽都非常出色，适合对性能有高要求的用户。</div><div style='margin-top:15px;text-align:center;'><a href='$ORDER_LINK' style='display:inline-block;padding:10px 20px;background:#ff4500;color:white;text-decoration:none;border-radius:5px;font-weight:bold;font-size:16px;'>⚡ 立即查看/下单 ⚡</a></div><div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='https://lowendtalk.com' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
     
     local PY_COMMAND="import sys; sys.path.append('$APP_DIR'); from send import NotificationSender; sender=NotificationSender('$CONFIG_FILE'); sender.send_html_message('$TITLE', \"\"\"$CONTENT\"\"\")"
     
@@ -254,10 +255,10 @@ run_uninstall() {
     echo "=== 完成 ==="
 }
 
-# V75: 更新 Prompt 嵌入链接占位符
+# V76: 更新 Prompt，增加 '简要概括' 和 '合适套餐推荐'
 run_update_config_prompt() {
     if [ -f "$CONFIG_FILE" ]; then
-        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>\n\n简要概括：\n<用一句话概括此促销活动的亮点>\n\n合适套餐推荐：\n<根据促销内容，推荐最划算或最值得购买的 1-2 个套餐>"
         local NEW_FILTER_PROMPT="你是一个中文辅助助手。请用**中文**简要总结这条回复的内容。如果回复内容是无意义的（如纯表情、'谢谢'、'已买'、'顶贴'、'Up'）或与VPS服务无关，请直接回复 FALSE。否则，请输出简短的中文摘要。"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
@@ -383,10 +384,13 @@ class ForumMonitor:
         text = text.replace('VPS：', '<b>VPS：</b>')
         text = text.replace('限时福利：', '<b>限时福利：</b>')
         text = text.replace('基础设施：', '<b>基础设施：</b>')
+        text = text.sub(r'\n简要概括：', '<br><br><b>简要概括：</b>', text)
+        text = text.sub(r'\n合适套餐推荐：', '<br><br><b>合适套餐推荐：</b>', text)
         text = text.replace('支付方式：', '<b>支付方式：</b>')
         text = text.replace('\n', '<br>')
         return text
 
+    # V76: 标题和链接修改
     def handle_thread(self, thread_data, extracted_links):
         existing_thread = self.threads_collection.find_one({'link': thread_data['link']})
         if not existing_thread:
@@ -403,28 +407,50 @@ class ForumMonitor:
                 
                 # V75: Inject the first extracted link into the summary
                 link_html = ''
+                order_link = ''
                 if extracted_links:
-                    # Use the first extracted link
-                    link_html = f' <a href="{extracted_links[0]}" style="color:#007bff;font-weight:bold;">[下单地址]</a>'
+                    order_link = extracted_links[0]
                     # Replace the placeholder in the raw summary text
-                    raw_summary = raw_summary.replace("[ORDER_LINK_HERE]", link_html, 1)
+                    raw_summary = raw_summary.replace("[ORDER_LINK_HERE]", f' <a href="{order_link}" style="color:#007bff;font-weight:bold;">[下单地址]</a>', 1)
 
                 html_summary = self.markdown_to_html(raw_summary)
                 
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
                 
-                # V73: Classic Header + V72 Body + Classic Button
+                # 1. 新标题：增加前缀 "LET新促销"
+                new_title = f"[LET新促销] {thread_data['title']}"
+
+                # 2. 生成消息内容 (V76)
                 msg_content = (
-                    f"<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>{thread_data['title']}</h4>"
+                    # 标题不变，但推送时使用 new_title
+                    f"<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>{thread_data['title']}</h4>" 
                     f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
                     f"👤 Author: {thread_data['creator']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH)"
                     f"</div>"
                     f"<div style='font-size:14px;line-height:1.6;color:#333;'>"
-                    f"{html_summary}"
+                    f"{html_summary}" 
                     f"</div>"
-                    f"<div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='{thread_data['link']}' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
                 )
-                self.notifier.send_html_message(thread_data['title'], msg_content)
+                
+                # 3. 添加下单地址超链接（如果存在）
+                if order_link:
+                    msg_content += (
+                        f"<div style='margin-top:15px;text-align:center;'>"
+                        f"<a href='{order_link}' style='display:inline-block;padding:10px 20px;background:#ff4500;color:white;text-decoration:none;border-radius:5px;font-weight:bold;font-size:16px;'>"
+                        f"⚡ 立即查看/下单 ⚡"
+                        f"</a>"
+                        f"</div>"
+                    )
+
+                # 4. 添加原帖链接按钮
+                msg_content += (
+                    f"<div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'>"
+                    f"<a href='{thread_data['link']}' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a>"
+                    f"</div>"
+                )
+                
+                # 5. 使用新标题推送
+                self.notifier.send_html_message(new_title, msg_content)
             return True 
         return False 
 
@@ -587,7 +613,7 @@ class ForumMonitor:
         if new_count == 0: log(f"完成。无新内容。", GRAY, "✅")
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (V75 Link Injection) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (V76 Link/Prompt Update) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 600)
         while True:
             print(f"{GRAY}--------------------------------------------------{NC}")
@@ -698,7 +724,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    echo "=== 部署 ForumMonitor (V75) ==="
+    echo "=== 部署 ForumMonitor (V76) ==="
     apt-get update
     apt-get install -y python3 python3-pip python3-venv nodejs jq curl gnupg lsb-release
 
@@ -722,7 +748,7 @@ run_install() {
 
     if [ ! -f "$CONFIG_FILE" ]; then
         read -p "Pushplus Token: " PT; read -p "CF Token: " CT; read -p "CF Account ID: " CID
-        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请严格按照以下格式输出（不要代码块）：\n\nVPS：\n• <套餐名>: <核心>C/<内存>/<硬盘>/<带宽>/<流量> → <价格> [ORDER_LINK_HERE]\n(请将占位符 [ORDER_LINK_HERE] 放置在第一个套餐末尾。如果有多个套餐，请换行列出，但无需再添加占位符)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>\n\n简要概括：\n<用一句话概括此促销活动的亮点>\n\n合适套餐推荐：\n<根据促销内容，推荐最划算或最值得购买的 1-2 个套餐>"
         jq -n --arg pt "$PT" --arg ct "$CT" --arg cid "$CID" --arg prompt "$PROMPT" \
            '{config: {pushplus_token: $pt, cf_token: $ct, cf_account_id: $cid, model: "@cf/meta/llama-3-8b-instruct", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600}}' > "$CONFIG_FILE"
     else
@@ -769,7 +795,7 @@ EOF
 show_menu() {
     clear
     show_dashboard
-    echo -e "${GREEN} ForumMonitor Manager (V75)${NC}"
+    echo -e "${GREEN} ForumMonitor Manager (V76 - Custom Push Logic)${NC}"
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
     
     echo -e "${CYAN} [基础管理]${NC}"
