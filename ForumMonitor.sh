@@ -30,7 +30,7 @@ HEARTBEAT_FILE="$APP_DIR/data/heartbeat.txt"
 STATS_FILE="$APP_DIR/data/stats.json"
 RESTART_LOG_FILE="$APP_DIR/data/restart_log.txt"
 SHORTCUT_PATH="/usr/local/bin/fm"
-UPDATE_URL="https://raw.githubusercontent.com/ypkin/ForumMonitor-LET/refs/heads/main/ForumMonitor.sh"
+UPDATE_URL="https://raw.githubusercontent.com/ypkin/RSS-ForumMonitor-LET/refs/heads/ForumMonitor-with-gemini/ForumMonitor.sh"
 
 # 颜色定义
 GREEN='\033[0;32m'
