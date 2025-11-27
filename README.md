@@ -27,7 +27,7 @@
 
 ```bash
 # 下载脚本
-curl -Lo ForumMonitor.sh https://raw.githubusercontent.com/ypkin/RSS-ForumMonitor-LET/refs/heads/main/ForumMonitor.sh # 假设的下载地址
+curl -Lo ForumMonitor.sh https://raw.githubusercontent.com/ypkin/RSS-ForumMonitor-LET/refs/heads/ForumMonitor-with-gemini/ForumMonitor.sh
 # 赋予执行权限
 chmod +x ForumMonitor.sh
 ```
