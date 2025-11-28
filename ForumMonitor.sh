@@ -1,18 +1,17 @@
 #!/bin/bash
 
 # --- ForumMonitor 管理脚本 (Gemini 2.5 Flash Lite Edition) ---
-# Version: 2025.11.27.14
+# Version: 2025.11.27.17
 # Features: 
+# [x] Fix: Telegram Long Message Split (Auto-Chunking)
+# [x] UI: Emoji Title Indicators (🟢/🔵/🔴)
+# [x] Dual Push: Pushplus + Telegram
 # [x] Anti-WAF (CloudScraper)
 # [x] Smart Limit Scan (Max 3 Pages)
 # [x] Capture Creator, Patron Provider & Top Host Replies
-# [x] Exact Comment Permalinks (Fix Jump Issue)
-# [x] Push Verification & History Log
-# [x] Dynamic Reply Titles (Creator vs Provider/Top Host)
-# [x] Full AI Repush (Same format as live alerts)
-# [x] Single-Threaded Repush Lock
+# [x] Exact Comment Permalinks
+# [x] Full AI Repush & History Log
 # [x] Auto Title Truncation
-# [x] Detailed Error Logging for AI (Debug Mode)
 #
 # --- (c) 2025 ---
 
@@ -107,7 +106,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (Top Host Support)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v17: Emoji & TG Split)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
@@ -142,21 +141,29 @@ run_edit_config() {
     echo "--- 修改配置 (直接回车保留原值) ---"
     
     local C_PT=$(jq -r '.config.pushplus_token' "$CONFIG_FILE")
+    local C_TG_TOK=$(jq -r '.config.telegram_bot_token // ""' "$CONFIG_FILE")
+    local C_TG_ID=$(jq -r '.config.telegram_chat_id // ""' "$CONFIG_FILE")
     local C_GK=$(jq -r '.config.gemini_api_key' "$CONFIG_FILE")
     local C_MODEL=$(jq -r '.config.model // "gemini-2.5-flash-lite"' "$CONFIG_FILE")
 
-    read -p "Pushplus Token (当前: ***${C_PT: -6}): " N_PT
+    read -p "Pushplus Token (当前: ${C_PT: -6}): " N_PT
+    echo -e "${YELLOW}Telegram 配置 (留空则不启用)${NC}"
+    read -p "Telegram Bot Token (当前: ${C_TG_TOK:0:9}...): " N_TG_TOK
+    read -p "Telegram Chat ID (当前: $C_TG_ID): " N_TG_ID
+    
+    echo -e "${GRAY}--------------------------------${NC}"
     read -p "Gemini API Key (当前: ***${C_GK: -6}): " N_GK
-    echo -e "${YELLOW}提示: 默认模型 gemini-2.5-flash-lite${NC}"
     read -p "Gemini Model Name (当前: $C_MODEL): " N_MODEL
 
     [ -z "$N_PT" ] && N_PT="$C_PT"
+    [ -z "$N_TG_TOK" ] && N_TG_TOK="$C_TG_TOK"
+    [ -z "$N_TG_ID" ] && N_TG_ID="$C_TG_ID"
     [ -z "$N_GK" ] && N_GK="$C_GK"
     [ -z "$N_MODEL" ] && N_MODEL="$C_MODEL"
 
     # 使用临时文件确保原子写入
-    jq --arg a "$N_PT" --arg b "$N_GK" --arg c "$N_MODEL" \
-       '.config.pushplus_token=$a|.config.gemini_api_key=$b|.config.model=$c' \
+    jq --arg a "$N_PT" --arg b "$N_GK" --arg c "$N_MODEL" --arg d "$N_TG_TOK" --arg e "$N_TG_ID" \
+       '.config.pushplus_token=$a|.config.gemini_api_key=$b|.config.model=$c|.config.telegram_bot_token=$d|.config.telegram_chat_id=$e' \
        "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     
     msg_ok "配置已更新，正在重启服务..."
@@ -335,7 +342,7 @@ try:
             )
             
             # 5. Send (Title truncated automatically by send.py if needed)
-            if monitor.notifier.send_html_message(f'[Repush] {title}', msg_content):
+            if monitor.notifier.send_html_message(f'🟡 [Repush] {title}', msg_content):
                 monitor.log_push_history('repush', title, link)
                 print('    ✅ Success')
                 count += 1
@@ -365,7 +372,7 @@ run_test_push() {
     check_jq
     msg_info "正在发送全格式测试通知..."
     
-    local TITLE="[TEST] 模拟: Gemini 2.5 Flash Lite (含历史记录写入)"
+    local TITLE="🟡 [TEST] 模拟: Gemini 2.5 Flash Lite"
     local CUR_TIME=$(date "+%Y-%m-%d %H:%M")
     local MODEL=$(jq -r '.config.model // "gemini-2.5-flash-lite"' "$CONFIG_FILE")
     
@@ -493,7 +500,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (Creator + Patron Provider + Top Host + Fixed Permalinks)..."
+    msg_info "写入 Python 核心代码 (With Emojis & TG Split)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -652,6 +659,9 @@ class ForumMonitor:
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
                 model_name = self.config.get('model', 'Unknown')
                 
+                # --- UPDATE: Emoji Title for New Thread ---
+                push_title = f"🟢 [新帖] {thread_data['title']}"
+
                 msg_content = (
                     f"<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>{thread_data['title']}</h4>"
                     f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
@@ -661,7 +671,6 @@ class ForumMonitor:
                 )
                 
                 # 发送并验证
-                push_title = f"LET新促销: {thread_data['title']}"
                 if self.notifier.send_html_message(push_title, msg_content):
                     self.log_push_history("thread", thread_data['title'], thread_data['link'])
 
@@ -679,16 +688,16 @@ class ForumMonitor:
                 time_str = created_at_sh.strftime('%Y-%m-%d %H:%M')
                 model_name = self.config.get('model', 'Unknown')
                 
-                # --- 动态标题逻辑 ---
+                # --- UPDATE: Emoji Title Logic ---
                 thread_provider = thread_data.get('creator', 'Unknown')
                 reply_author = comment_data['author']
                 
                 if reply_author == thread_provider:
-                    push_title = f"[{thread_provider}] 楼主新回复"
+                    push_title = f"🔵 [{thread_provider}] 楼主新回复"
                     header_color = "#007bff" # Blue for Creator
                 else:
                     # Patron Provider / Other Provider / Top Host reply
-                    push_title = f"[{thread_provider}] ⚡商家({reply_author})插播"
+                    push_title = f"🔴 [{thread_provider}] ⚡商家({reply_author})插播"
                     header_color = "#d63384" # Pink for Third-party Provider
 
                 msg_content = (
@@ -977,11 +986,12 @@ google-generativeai
 cloudscraper
 EOF
 
-    msg_info "写入推送模块..."
+    msg_info "写入推送模块 (Pushplus + Telegram Fix)..."
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
 import requests
 import os
+import re
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from datetime import datetime
@@ -1001,7 +1011,10 @@ class NotificationSender:
         self.config_path = config_path
         base_dir = os.path.dirname(os.path.abspath(config_path))
         self.stats_path = os.path.join(base_dir, 'stats.json')
-        self.token = ""
+        self.pushplus_token = ""
+        self.tg_bot_token = ""
+        self.tg_chat_id = ""
+        
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': 'curl/7.74.0'})
         adapter = HTTPAdapter(max_retries=Retry(total=3, backoff_factor=1))
@@ -1011,7 +1024,10 @@ class NotificationSender:
     def load_config(self):
         try:
             with open(self.config_path, 'r') as f:
-                self.token = json.load(f)['config'].get('pushplus_token', '')
+                cfg = json.load(f)['config']
+                self.pushplus_token = cfg.get('pushplus_token', '')
+                self.tg_bot_token = cfg.get('telegram_bot_token', '')
+                self.tg_chat_id = cfg.get('telegram_chat_id', '')
         except: pass
 
     def record_success(self):
@@ -1026,35 +1042,121 @@ class NotificationSender:
     def send_message(self, message):
         return self.send_html_message("ForumMonitor Notification", message)
 
-    def send_html_message(self, title, html_content):
-        if not self.token or self.token == "YOUR_PUSHPLUS_TOKEN_HERE":
-            log(f"Virtual Push (Token missing)", RED, "⚠️")
+    def send_telegram(self, title, html_content):
+        if not self.tg_bot_token or not self.tg_chat_id:
             return False
-
-        # FIX: Truncate title to meet Pushplus 100 char limit
-        if len(title) > 95:
-            title = title[:92] + "..."
 
         try:
-            payload = {
-                "token": self.token,
-                "title": title,
-                "content": html_content,
-                "template": "html"
-            }
+            # Telegram HTML Clean-up Adapter
+            # 1. Combine Title (Bold) + Content
+            msg = f"<b>{title}</b>\n\n{html_content}"
             
-            resp = self.session.post("https://www.pushplus.plus/send", json=payload, timeout=15)
+            # 2. Convert standard HTML tags to Telegram supported subset
+            # Replace <br> with newline
+            msg = msg.replace("<br>", "\n").replace("<br/>", "\n")
             
-            if resp.status_code == 200 and resp.json().get('code') == 200:
-                log(f"Push Sent: {title[:30]}...", GREEN, "📨")
-                self.record_success()
-                return True 
+            # Replace <h4> with Bold + Newline (Used for titles in core.py)
+            msg = re.sub(r'<h4.*?>(.*?)</h4>', r'<b>\1</b>\n', msg, flags=re.DOTALL)
+            
+            # Remove div and span tags but keep content (TG doesn't support them)
+            msg = re.sub(r'<div.*?>', '', msg)
+            msg = msg.replace('</div>', '\n')
+            msg = re.sub(r'<span.*?>', '', msg)
+            msg = msg.replace('</span>', ' ')
+            
+            # Clean up excessive newlines
+            while "\n\n\n" in msg:
+                msg = msg.replace("\n\n\n", "\n\n")
+
+            # --- SPLIT LOGIC START (Fix for error 400) ---
+            messages = []
+            MAX_LEN = 4000 # Safe limit under 4096 to allow markup overhead
+
+            if len(msg) > MAX_LEN:
+                while len(msg) > 0:
+                    if len(msg) <= MAX_LEN:
+                        messages.append(msg)
+                        break
+                    
+                    # Try to split at the nearest newline before the limit
+                    split_idx = msg.rfind('\n', 0, MAX_LEN)
+                    
+                    if split_idx == -1: 
+                        # No newline found? Force split at limit
+                        split_idx = MAX_LEN
+                    
+                    messages.append(msg[:split_idx])
+                    msg = msg[split_idx:]
             else:
-                log(f"Push Fail: {resp.text}", RED, "❌")
-                return False 
+                messages.append(msg)
+            # --- SPLIT LOGIC END ---
+
+            all_success = True
+            for i, part in enumerate(messages):
+                # Add indicator for continuation
+                if len(messages) > 1:
+                    header = f"[Part {i+1}/{len(messages)}]\n" if i > 0 else ""
+                    part_to_send = header + part
+                else:
+                    part_to_send = part
+
+                url = f"https://api.telegram.org/bot{self.tg_bot_token}/sendMessage"
+                payload = {
+                    'chat_id': self.tg_chat_id,
+                    'text': part_to_send,
+                    'parse_mode': 'HTML',
+                    'disable_web_page_preview': True
+                }
+                
+                resp = self.session.post(url, json=payload, timeout=15)
+                if resp.status_code == 200:
+                    log(f"Telegram Sent: {title[:30]}... (Part {i+1})", GREEN, "✈️")
+                else:
+                    log(f"Telegram Fail: {resp.text}", RED, "❌")
+                    all_success = False
+            
+            return all_success
+
         except Exception as e:
-            log(f"Push Error: {e}", RED, "❌")
+            log(f"Telegram Error: {e}", RED, "❌")
             return False
+
+    def send_html_message(self, title, html_content):
+        success_count = 0
+        
+        # 1. Pushplus Send
+        if self.pushplus_token and self.pushplus_token != "YOUR_PUSHPLUS_TOKEN_HERE":
+            try:
+                # Truncate title for Pushplus limit
+                pp_title = title[:92] + "..." if len(title) > 95 else title
+                payload = {
+                    "token": self.pushplus_token,
+                    "title": pp_title,
+                    "content": html_content,
+                    "template": "html"
+                }
+                resp = self.session.post("https://www.pushplus.plus/send", json=payload, timeout=15)
+                if resp.status_code == 200 and resp.json().get('code') == 200:
+                    log(f"Pushplus Sent: {title[:30]}...", GREEN, "📨")
+                    success_count += 1
+                else:
+                    log(f"Pushplus Fail: {resp.text}", RED, "❌")
+            except Exception as e:
+                log(f"Pushplus Error: {e}", RED, "❌")
+
+        # 2. Telegram Send
+        if self.send_telegram(title, html_content):
+            success_count += 1
+
+        # Record success if at least one method worked
+        if success_count > 0:
+            self.record_success()
+            return True
+            
+        if not self.pushplus_token and not self.tg_bot_token:
+             log(f"Virtual Push (No Token configured)", RED, "⚠️")
+             
+        return False
 EOF
 }
 
@@ -1115,12 +1217,15 @@ run_install() {
     # 5. 生成配置文件
     if [ ! -f "$CONFIG_FILE" ]; then
         read -p "请输入 Pushplus Token: " PT
+        echo -e "${YELLOW}Telegram 配置 (留空跳过)${NC}"
+        read -p "Telegram Bot Token: " TG_TOK
+        read -p "Telegram Chat ID: " TG_ID
         read -p "请输入 Gemini API Key: " GK
         # UPDATE: 新安装时使用新的 Prompt
         local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
-        jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" \
-           '{config: {pushplus_token: $pt, gemini_api_key: $gk, model: "gemini-2.5-flash-lite", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600}}' > "$CONFIG_FILE"
+        jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
+           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.5-flash-lite", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600}}' > "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
     else
         run_update_config_prompt
