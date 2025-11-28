@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # --- ForumMonitor 管理脚本 (Gemini 2.5 Flash Lite Edition) ---
-# Version: 2025.11.27.9
+# Version: 2025.11.27.14
 # Features: 
 # [x] Anti-WAF (CloudScraper)
-# [x] Strict Sales Filter & AI Picks
-# [x] True Reverse Scan (Smart Stop)
+# [x] Smart Limit Scan (Max 3 Pages)
+# [x] Capture Creator, Patron Provider & Top Host Replies
+# [x] Exact Comment Permalinks (Fix Jump Issue)
 # [x] Push Verification & History Log
-# [x] Dynamic Reply Titles (Provider Name)
+# [x] Dynamic Reply Titles (Creator vs Provider/Top Host)
 # [x] Full AI Repush (Same format as live alerts)
 # [x] Single-Threaded Repush Lock
 # [x] Auto Title Truncation
 # [x] Detailed Error Logging for AI (Debug Mode)
-# [x] Default Model: gemini-2.5-flash-lite
 #
 # --- (c) 2025 ---
 
@@ -107,7 +107,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (Gemini 2.5 Flash Lite)${NC}"
+    echo -e " ${CYAN}ForumMonitor (Top Host Support)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
@@ -493,7 +493,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (With Debug Logging)..."
+    msg_info "写入 Python 核心代码 (Creator + Patron Provider + Top Host + Fixed Permalinks)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -679,21 +679,29 @@ class ForumMonitor:
                 time_str = created_at_sh.strftime('%Y-%m-%d %H:%M')
                 model_name = self.config.get('model', 'Unknown')
                 
-                # 动态标题：[Provider] 楼主新回复
-                provider_name = thread_data.get('creator', 'Unknown')
-                push_title = f"[{provider_name}] 楼主新回复"
+                # --- 动态标题逻辑 ---
+                thread_provider = thread_data.get('creator', 'Unknown')
+                reply_author = comment_data['author']
+                
+                if reply_author == thread_provider:
+                    push_title = f"[{thread_provider}] 楼主新回复"
+                    header_color = "#007bff" # Blue for Creator
+                else:
+                    # Patron Provider / Other Provider / Top Host reply
+                    push_title = f"[{thread_provider}] ⚡商家({reply_author})插播"
+                    header_color = "#d63384" # Pink for Third-party Provider
 
                 msg_content = (
-                    f"<h4 style='color:#007bff;margin-bottom:5px;'>💬 {push_title}</h4>"
+                    f"<h4 style='color:{header_color};margin-bottom:5px;'>💬 {push_title}</h4>"
                     f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
                     f"📌 Source: {thread_data['title']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 {model_name}"
                     f"</div>"
                     f"<div style='background:#f8f9fa;padding:10px;border:1px solid #eee;border-radius:5px;color:#333;'><b>🤖 AI 分析:</b><br>{ai_resp}</div>"
-                    f"<div style='margin-top:15px;'><a href='{comment_data['url']}' style='color:#007bff;'>👉 查看回复</a></div>"
+                    f"<div style='margin-top:15px;'><a href='{comment_data['url']}' style='color:{header_color};'>👉 查看回复</a></div>"
                 )
                 
                 if self.notifier.send_html_message(push_title, msg_content):
-                    self.log_push_history("reply", f"{provider_name}: {thread_data['title']}", comment_data['url'])
+                    self.log_push_history("reply", f"{push_title}", comment_data['url'])
                     
         except errors.DuplicateKeyError: pass 
         except: pass
@@ -715,15 +723,32 @@ class ForumMonitor:
                 found_recent = True
                 
                 author_tag = comment.find('a', class_='Username')
-                if not author_tag or author_tag.text != thread_data['creator']: continue 
+                if not author_tag: continue
                 
+                # --- 核心逻辑修改: 检测 Creator 和 Provider (含 Top Host) ---
+                author_name = author_tag.text
+                is_creator = (author_name == thread_data['creator'])
+                
+                # 获取 li 的 class 列表，查找是否包含 Provider 相关的角色
+                # LET 通常使用 Role_PatronProvider, Role_Provider, Role_TopHost 等
+                comment_classes = comment.get('class', [])
+                # 模糊匹配: 只要 class 里包含 'provider' 或 'tophost' (忽略大小写) 就认为是商家
+                is_provider = any(k in c.lower() for c in comment_classes for k in ['provider', 'tophost'])
+                
+                # 如果既不是楼主，也不是 Provider/TopHost，则跳过
+                if not (is_creator or is_provider): continue 
+                # -----------------------------------------------
+
                 comment_id = comment['id'].replace('Comment_', '')
                 message = comment.find('div', class_='Message').text.strip()
                 
+                # FIX: Use Exact Permalink structure to ensure jump works
+                permalink_url = f"https://lowendtalk.com/discussion/comment/{comment_id}/#Comment_{comment_id}"
+
                 c_data = {
                     'comment_id': comment_id, 'thread_link': thread_data['link'],
-                    'author': author_tag.text, 'message': message, 'created_at': created_at_aware, 
-                    'url': f"{thread_data['link']}#Comment_{comment_id}"
+                    'author': author_name, 'message': message, 'created_at': created_at_aware, 
+                    'url': permalink_url
                 }
                 self.handle_comment(c_data, thread_data, created_at_sh)
             except: pass
@@ -759,8 +784,9 @@ class ForumMonitor:
             soup = BeautifulSoup(resp.text, 'html.parser')
             max_page = self.get_max_page_from_soup(soup)
             
-            # Reverse Scan: Max -> 1
-            for page in range(max_page, 0, -1):
+            # Reverse Scan: Limit to last 3 pages (Max -> Max-2)
+            target_limit = max(1, max_page - 2)
+            for page in range(max_page, target_limit - 1, -1):
                 page_start = time.time()
                 
                 if page == 1 and max_page == 1:
