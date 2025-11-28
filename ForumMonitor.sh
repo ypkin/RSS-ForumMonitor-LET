@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # --- ForumMonitor 管理脚本 (Gemini 2.5 Flash Lite Edition) ---
-# Version: 2025.11.28.27
+# Version: 2025.11.28.29
 # Features: 
-# [x] AI Prompt v2: Capture Sales + Giveaways (Raffles/Freebies)
-# [x] Output Format: Generalized for perks (🎁 Content / 🎫 Rule)
-# [x] Target User Monitor: Scan specific usernames regardless of role
+# [x] API Fix: 429 Rate Limit Handler (Auto Retry + Backoff)
+# [x] Target User Monitor: Scan specific usernames
 # [x] Menu Reordered: 1-19 sequence
 # [x] Dynamic Role Manager (Creator/Provider/Admin...)
 # [x] VIP Monitor & Multi-Category Scan
+# [x] AI Prompt: Structured Extraction
 # [x] Fix: Telegram Long Message Split
 # [x] UI: Emoji Title Indicators
 #
@@ -109,7 +109,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v27: Sales + Giveaways)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v29: Anti-429 RateLimit)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
@@ -286,7 +286,7 @@ run_manage_roles() {
         echo -e "  4. $S Host Rep"
         
         if has_role "admin"; then S="✅"; else S="❌"; fi
-        echo -e "  5. $S 管理员 (Admin)"
+        echo -e "  5. $S 管理员 (Administrator)"
         
         if has_role "other"; then S="✅"; else S="❌"; fi
         echo -e "  6. $S 其他 (All Others) ${RED}*全量监控 (慎开)${NC}"
@@ -694,7 +694,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (Prompt v2 + Fixes)..."
+    msg_info "写入 Python 核心代码 (Anti-429 + Rate Limit)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -800,21 +800,40 @@ class ForumMonitor:
             })
         except: pass
 
-    # --- AI & Tooling (Patched for Debugging) ---
+    # --- AI & Tooling (Smart Retry Wrapper) ---
+    def call_gemini_safe(self, model_instance, content):
+        retries = 3
+        delay = 5
+        
+        for i in range(retries):
+            try:
+                # Basic throttle
+                time.sleep(2) 
+                response = model_instance.generate_content(content)
+                return response.text
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "quota" in err_str.lower():
+                    log(f"⚠️ AI Quota Exceeded (429). Retrying in {delay}s... ({i+1}/{retries})", YELLOW)
+                    time.sleep(delay)
+                    delay *= 2 # Exponential backoff
+                else:
+                    log(f"❌ AI Error: {e}", RED)
+                    return "FALSE" # Non-retryable error
+        
+        log(f"❌ AI Failed after {retries} retries.", RED)
+        return "FALSE"
+
     def get_summarize_from_ai(self, description):
         try: 
-            return self.model_summary.generate_content(description).text
-        except Exception as e:
-            log(f"AI Summary Error: {e}", RED, "❌")
-            return f"AI 摘要失败: {str(e)[:50]}..."
+            return self.call_gemini_safe(self.model_summary, description)
+        except: return "AI Error"
 
     def get_filter_from_ai(self, description):
         try:
-            text = self.model_filter.generate_content(description).text.strip()
+            text = self.call_gemini_safe(self.model_filter, description).strip()
             return "FALSE" if "FALSE" in text else text
-        except Exception as e:
-            log(f"AI Filter Error: {e}", RED, "❌")
-            return "FALSE"
+        except: return "FALSE"
 
     def markdown_to_html(self, text):
         text = text.replace("<", "&lt;").replace(">", "&gt;")
@@ -824,7 +843,6 @@ class ForumMonitor:
         text = text.replace('限时福利：', '<b>限时福利：</b>')
         text = text.replace('基础设施：', '<b>基础设施：</b>')
         text = text.replace('支付方式：', '<b>支付方式：</b>')
-        # Update mappings for new prompt fields
         text = text.replace('🎁 内容', '<b>🎁 内容</b>')
         text = text.replace('📦 套餐', '<b>📦 套餐</b>')
         text = text.replace('🏷️ 代码', '<b>🏷️ 代码</b>')
