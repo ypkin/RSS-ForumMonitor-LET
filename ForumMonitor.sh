@@ -1,15 +1,14 @@
 #!/bin/bash
 
 # --- ForumMonitor 管理脚本 (Gemini 2.5 Flash Lite Edition) ---
-# Version: 2025.11.28.26
+# Version: 2025.11.28.27
 # Features: 
-# [x] Target User Monitor: Scan specific usernames regardless of role (Menu 19)
-# [x] Menu Update: Renamed "Other" to "All Regular Users (Caution)"
+# [x] AI Prompt v2: Capture Sales + Giveaways (Raffles/Freebies)
+# [x] Output Format: Generalized for perks (🎁 Content / 🎫 Rule)
+# [x] Target User Monitor: Scan specific usernames regardless of role
 # [x] Menu Reordered: 1-19 sequence
-# [x] Admin Check: Explicit "Administrator" username check
 # [x] Dynamic Role Manager (Creator/Provider/Admin...)
 # [x] VIP Monitor & Multi-Category Scan
-# [x] AI Prompt: Structured Extraction
 # [x] Fix: Telegram Long Message Split
 # [x] UI: Emoji Title Indicators
 #
@@ -110,7 +109,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v26: Target Users)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v27: Sales + Giveaways)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
@@ -684,8 +683,8 @@ run_update_config_prompt() {
         # Prompt 1: 新帖摘要 (增加 AI 甄选)
         local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
-        # Prompt 2: 回复过滤 (结构化提取版)
-        local NEW_FILTER_PROMPT="你是一个VPS销售分析师。请分析这条回复。如果没有具体的‘补货/降价/新优惠码/闪购’信息，直接回复 FALSE。如果包含销售信息，请务必按以下格式提取详情（不要用代码块）：\n\n📦 **套餐**: <核心/内存/硬盘/带宽> - <价格>\n🏷️ **优惠码**: <代码>\n🔗 **链接**: <URL>\n📝 **备注**: <简短说明>"
+        # Prompt 2: 回复过滤 (福利兼容版)
+        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** (Sales) 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
            '.config.thread_prompt = $p | .config.filter_prompt = $f' \
@@ -695,7 +694,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (Target Users + Other Fix)..."
+    msg_info "写入 Python 核心代码 (Prompt v2 + Fixes)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -825,8 +824,12 @@ class ForumMonitor:
         text = text.replace('限时福利：', '<b>限时福利：</b>')
         text = text.replace('基础设施：', '<b>基础设施：</b>')
         text = text.replace('支付方式：', '<b>支付方式：</b>')
+        # Update mappings for new prompt fields
+        text = text.replace('🎁 内容', '<b>🎁 内容</b>')
         text = text.replace('📦 套餐', '<b>📦 套餐</b>')
+        text = text.replace('🏷️ 代码', '<b>🏷️ 代码</b>')
         text = text.replace('🏷️ 优惠码', '<b>🏷️ 优惠码</b>')
+        text = text.replace('🏷️ 规则', '<b>🏷️ 规则</b>')
         text = text.replace('\n', '<br>')
         return text
 
