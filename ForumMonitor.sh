@@ -1,17 +1,17 @@
 #!/bin/bash
 
 # --- ForumMonitor 管理脚本 (Gemini 2.5 Flash Lite Edition) ---
-# Version: 2025.11.28.18
+# Version: 2025.11.28.26
 # Features: 
-# [x] AI Prompt: Structured Extraction for Replies (Plan/Code/Link)
-# [x] Fix: Telegram Long Message Split (Auto-Chunking)
-# [x] UI: Emoji Title Indicators (🟢/🔵/🔴)
-# [x] Dual Push: Pushplus + Telegram
-# [x] Anti-WAF (CloudScraper)
-# [x] Smart Limit Scan (Max 3 Pages)
-# [x] Capture Creator, Patron Provider & Top Host Replies
-# [x] Exact Comment Permalinks
-# [x] Full AI Repush & History Log
+# [x] Target User Monitor: Scan specific usernames regardless of role (Menu 19)
+# [x] Menu Update: Renamed "Other" to "All Regular Users (Caution)"
+# [x] Menu Reordered: 1-19 sequence
+# [x] Admin Check: Explicit "Administrator" username check
+# [x] Dynamic Role Manager (Creator/Provider/Admin...)
+# [x] VIP Monitor & Multi-Category Scan
+# [x] AI Prompt: Structured Extraction
+# [x] Fix: Telegram Long Message Split
+# [x] UI: Emoji Title Indicators
 #
 # --- (c) 2025 ---
 
@@ -100,17 +100,21 @@ show_dashboard() {
     
     local CUR_MODEL="Unknown"
     local CUR_THREADS="5"
+    local VIP_COUNT="0"
+    local USER_COUNT="0"
     if [ -f "$CONFIG_FILE" ]; then
         CUR_MODEL=$(jq -r '.config.model // "gemini-2.5-flash-lite"' "$CONFIG_FILE")
         CUR_THREADS=$(jq -r '.config.max_workers // 5' "$CONFIG_FILE")
+        VIP_COUNT=$(jq -r '.config.vip_threads | length' "$CONFIG_FILE")
+        USER_COUNT=$(jq -r '.config.monitored_usernames | length' "$CONFIG_FILE")
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v18: Structured Reply)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v26: Target Users)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
-    printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "当前模型:" "$CYAN" "$CUR_MODEL" "$NC" "RSS并发数:" "$CYAN" "$CUR_THREADS" "$NC"
+    printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "VIP监控数:" "$CYAN" "$VIP_COUNT" "$NC" "指定用户数:" "$CYAN" "$USER_COUNT" "$NC"
     echo -e "${BLUE}================================================================${NC}"
 }
 
@@ -133,6 +137,188 @@ run_restart() {
     msg_info "正在重启服务..."
     systemctl restart $SERVICE_NAME
     msg_ok "服务已重启"
+}
+
+run_manage_vip() {
+    check_service_exists
+    check_jq
+    
+    while true; do
+        echo -e "\n${CYAN}--- VIP 专线监控管理 ---${NC}"
+        echo -e "${GRAY}VIP 列表中的帖子将强制每轮扫描，无视时间和板块限制。${NC}"
+        
+        local VIPS=$(jq -r '.config.vip_threads[]' "$CONFIG_FILE" 2>/dev/null || echo "")
+        local COUNT=0
+        if [ -n "$VIPS" ]; then
+            echo -e "\n当前监控列表:"
+            IFS=$'\n'
+            for url in $VIPS; do
+                echo -e "  [${GREEN}$COUNT${NC}] $url"
+                COUNT=$((COUNT+1))
+            done
+            unset IFS
+        else
+            echo -e "\n(列表为空)"
+        fi
+        
+        echo -e "\n${YELLOW}操作选项:${NC}"
+        echo "  1. 添加 URL (Add)"
+        echo "  2. 删除 URL (Del)"
+        echo "  3. 返回上级 (Back)"
+        read -p "请选择: " OPT
+        
+        case "$OPT" in
+            1)
+                read -p "请输入帖子完整 URL: " NEW_URL
+                if [[ "$NEW_URL" == http* ]]; then
+                    jq 'if .config.vip_threads == null then .config.vip_threads = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                    
+                    if jq -e --arg url "$NEW_URL" '.config.vip_threads | index($url)' "$CONFIG_FILE" >/dev/null; then
+                        msg_warn "该 URL 已存在!"
+                    else
+                        jq --arg url "$NEW_URL" '.config.vip_threads += [$url]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                        msg_ok "添加成功"
+                    fi
+                else
+                    msg_err "无效的 URL"
+                fi
+                ;;
+            2)
+                read -p "请输入要删除的序号 (0-$((COUNT-1))): " DEL_IDX
+                if [[ "$DEL_IDX" =~ ^[0-9]+$ ]] && [ "$DEL_IDX" -lt "$COUNT" ]; then
+                    jq "del(.config.vip_threads[$DEL_IDX])" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                    msg_ok "删除成功"
+                else
+                    msg_err "无效序号"
+                fi
+                ;;
+            3) return ;;
+            *) ;;
+        esac
+    done
+}
+
+run_manage_users() {
+    check_service_exists
+    check_jq
+    
+    while true; do
+        echo -e "\n${CYAN}--- 指定用户监控 (Target Users) ---${NC}"
+        echo -e "${GRAY}在此列表中的用户，无论是否有商家身份，都会被强制监控。${NC}"
+        
+        local USERS=$(jq -r '.config.monitored_usernames[]' "$CONFIG_FILE" 2>/dev/null || echo "")
+        local COUNT=0
+        if [ -n "$USERS" ]; then
+            echo -e "\n当前指定用户列表:"
+            IFS=$'\n'
+            for u in $USERS; do
+                echo -e "  [${GREEN}$COUNT${NC}] $u"
+                COUNT=$((COUNT+1))
+            done
+            unset IFS
+        else
+            echo -e "\n(列表为空)"
+        fi
+        
+        echo -e "\n${YELLOW}操作选项:${NC}"
+        echo "  1. 添加用户名 (Add)"
+        echo "  2. 删除用户名 (Del)"
+        echo "  3. 返回上级 (Back)"
+        read -p "请选择: " OPT
+        
+        case "$OPT" in
+            1)
+                read -p "请输入用户名 (区分大小写, 例如 Spirit): " NEW_USER
+                if [ -n "$NEW_USER" ]; then
+                    jq 'if .config.monitored_usernames == null then .config.monitored_usernames = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                    
+                    if jq -e --arg u "$NEW_USER" '.config.monitored_usernames | index($u)' "$CONFIG_FILE" >/dev/null; then
+                        msg_warn "该用户已存在!"
+                    else
+                        jq --arg u "$NEW_USER" '.config.monitored_usernames += [$u]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                        msg_ok "添加成功"
+                    fi
+                else
+                    msg_err "用户名不能为空"
+                fi
+                ;;
+            2)
+                read -p "请输入要删除的序号 (0-$((COUNT-1))): " DEL_IDX
+                if [[ "$DEL_IDX" =~ ^[0-9]+$ ]] && [ "$DEL_IDX" -lt "$COUNT" ]; then
+                    jq "del(.config.monitored_usernames[$DEL_IDX])" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                    msg_ok "删除成功"
+                else
+                    msg_err "无效序号"
+                fi
+                ;;
+            3) return ;;
+            *) ;;
+        esac
+    done
+}
+
+run_manage_roles() {
+    check_service_exists
+    check_jq
+    
+    # Initialize monitored_roles if missing (Default: all except 'other')
+    jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","admin"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    while true; do
+        echo -e "\n${CYAN}--- 监控角色设置 ---${NC}"
+        echo -e "${GRAY}仅启用角色的回复会被送入 AI 分析。${NC}"
+        
+        has_role() {
+            jq -e --arg r "$1" '.config.monitored_roles | index($r)' "$CONFIG_FILE" >/dev/null
+        }
+        
+        echo -e "\n当前状态:"
+        
+        if has_role "creator"; then S="✅"; else S="❌"; fi
+        echo -e "  1. $S 楼主 (Creator)"
+        
+        if has_role "provider"; then S="✅"; else S="❌"; fi
+        echo -e "  2. $S 认证商家 (Provider)"
+        
+        if has_role "top_host"; then S="✅"; else S="❌"; fi
+        echo -e "  3. $S Top Host"
+        
+        if has_role "host_rep"; then S="✅"; else S="❌"; fi
+        echo -e "  4. $S Host Rep"
+        
+        if has_role "admin"; then S="✅"; else S="❌"; fi
+        echo -e "  5. $S 管理员 (Admin)"
+        
+        if has_role "other"; then S="✅"; else S="❌"; fi
+        echo -e "  6. $S 其他 (All Others) ${RED}*全量监控 (慎开)${NC}"
+        
+        echo -e "\n${YELLOW}操作选项:${NC}"
+        echo "  输入数字 (1-6) 切换状态"
+        echo "  q. 返回上级"
+        read -p "请选择: " OPT
+        
+        target=""
+        case "$OPT" in
+            1) target="creator" ;;
+            2) target="provider" ;;
+            3) target="top_host" ;;
+            4) target="host_rep" ;;
+            5) target="admin" ;;
+            6) target="other" ;;
+            q|Q) return ;;
+            *) msg_err "无效选项"; continue ;;
+        esac
+        
+        if [ -n "$target" ]; then
+            if has_role "$target"; then
+                jq --arg r "$target" '.config.monitored_roles -= [$r]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                msg_warn "已禁用: $target"
+            else
+                jq --arg r "$target" '.config.monitored_roles += [$r]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                msg_ok "已启用: $target"
+            fi
+        fi
+    done
 }
 
 run_edit_config() {
@@ -486,6 +672,15 @@ run_uninstall() {
 
 run_update_config_prompt() {
     if [ -f "$CONFIG_FILE" ]; then
+        # Ensure vip_threads array exists
+        jq 'if .config.vip_threads == null then .config.vip_threads = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+        
+        # Ensure monitored_usernames array exists
+        jq 'if .config.monitored_usernames == null then .config.monitored_usernames = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+        
+        # Ensure monitored_roles array exists (Default: all except other)
+        jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","admin"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
         # Prompt 1: 新帖摘要 (增加 AI 甄选)
         local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
@@ -500,7 +695,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (With Structured Reply & Emojis)..."
+    msg_info "写入 Python 核心代码 (Target Users + Other Fix)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -703,7 +898,7 @@ class ForumMonitor:
                     header_color = "#007bff" # Blue for Creator
                 else:
                     # Patron Provider / Other Provider / Top Host reply
-                    push_title = f"🔴 [{thread_provider}] ⚡商家({reply_author})插播"
+                    push_title = f"🔴 [{thread_provider}] ⚡插播({reply_author})"
                     header_color = "#d63384" # Pink for Third-party Provider
 
                 msg_content = (
@@ -726,6 +921,11 @@ class ForumMonitor:
         soup = BeautifulSoup(html_content, 'html.parser')
         comments = soup.find_all('li', class_='ItemComment')
         now_sh = datetime.now(SHANGHAI)
+        
+        # Load configs
+        enabled_roles = self.config.get('monitored_roles', ["creator", "provider", "top_host", "host_rep", "admin"])
+        target_usernames = self.config.get('monitored_usernames', [])
+        
         found_recent = False
 
         for comment in comments:
@@ -739,25 +939,54 @@ class ForumMonitor:
                 
                 author_tag = comment.find('a', class_='Username')
                 if not author_tag: continue
-                
-                # --- 核心逻辑修改: 检测 Creator 和 Provider (含 Top Host) ---
                 author_name = author_tag.text
-                is_creator = (author_name == thread_data['creator'])
                 
-                # 获取 li 的 class 列表，查找是否包含 Provider 相关的角色
-                # LET 通常使用 Role_PatronProvider, Role_Provider, Role_TopHost 等
+                # --- Role & User Logic ---
+                role_hits = []
+                is_target_user = (author_name in target_usernames)
+                
+                # 1. Check Creator
+                if author_name == thread_data['creator']:
+                    role_hits.append('creator')
+                
+                # 2. Check CSS Classes / Username for Others
                 comment_classes = comment.get('class', [])
-                # 模糊匹配: 只要 class 里包含 'provider' 或 'tophost' (忽略大小写) 就认为是商家
-                is_provider = any(k in c.lower() for c in comment_classes for k in ['provider', 'tophost'])
+                class_str = " ".join(comment_classes).lower()
                 
-                # 如果既不是楼主，也不是 Provider/TopHost，则跳过
-                if not (is_creator or is_provider): continue 
+                if 'role_patronprovider' in class_str or 'role_provider' in class_str:
+                    role_hits.append('provider')
+                if 'role_tophost' in class_str:
+                    role_hits.append('top_host')
+                if 'role_hostrep' in class_str:
+                    role_hits.append('host_rep')
+                
+                # Admin check
+                if 'role_administrator' in class_str or author_name.lower() == 'administrator':
+                    role_hits.append('admin')
+                
+                # 3. If no special roles, it counts as 'other'
+                if not role_hits:
+                    role_hits.append('other')
+                
+                # 4. DECISION: Process if (Role is Enabled) OR (User is in Target List)
+                should_process = False
+                
+                # Check Roles
+                if any(r in enabled_roles for r in role_hits):
+                    should_process = True
+                
+                # Check Specific User (Overrides Role check)
+                if is_target_user:
+                    should_process = True
+                    
+                if not should_process:
+                    continue
                 # -----------------------------------------------
 
                 comment_id = comment['id'].replace('Comment_', '')
                 message = comment.find('div', class_='Message').text.strip()
                 
-                # FIX: Use Exact Permalink structure to ensure jump works
+                # FIX: Use Exact Permalink structure
                 permalink_url = f"https://lowendtalk.com/discussion/comment/{comment_id}/#Comment_{comment_id}"
 
                 c_data = {
@@ -887,77 +1116,127 @@ class ForumMonitor:
                 log(f"RSS 扫描完成 | 耗时: {duration:.2f}s | 新帖:{stats['NEW_PUSH']} | 活跃:{stats['ACTIVE']} | 静默:{stats['SILENT']}", GREEN)
         except Exception as e: log(f"RSS Error: {e}", RED, "❌")
 
+    # --- VIP Monitor Logic ---
+    def check_vip_threads(self):
+        # Read from config instead of hardcoded list
+        vip_urls = self.config.get('vip_threads', [])
+        
+        if not vip_urls: return
+        
+        log(f"VIP 专线扫描开始 ({len(vip_urls)} urls)...", MAGENTA, "👑")
+        
+        for url in vip_urls:
+            try:
+                # 1. Scrape the thread page first to get metadata
+                resp = self.scraper.get(url, timeout=30)
+                if resp.status_code != 200:
+                    log(f"   ❌ VIP 过盾失败: {url}", RED)
+                    continue
+                
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                
+                # Extract Title
+                title_tag = soup.select_one('.PageTitle h1')
+                if not title_tag: continue
+                title = title_tag.get_text(strip=True)
+                
+                # Extract Creator
+                creator = "Unknown"
+                author_tag = soup.select_one('.Author .Username')
+                if author_tag: creator = author_tag.get_text(strip=True)
+                
+                # Construct data object
+                t_data = {
+                    'link': url,
+                    'title': title,
+                    'creator': creator,
+                    'pub_date': datetime.now(timezone.utc) # Dummy date to force "Active"
+                }
+                
+                # Upsert to DB to ensure we have the creator info
+                self.threads_collection.update_one(
+                    {'link': url}, 
+                    {'$setOnInsert': t_data}, 
+                    upsert=True
+                )
+                
+                # Force fetch comments
+                self.fetch_comments(t_data, silent=False)
+                
+            except Exception as e:
+                log(f"VIP Scan Error: {e}", RED, "❌")
+
     # --- Category Logic (Single-Threaded for Safety) ---
     def check_category_list(self):
-        url = "https://lowendtalk.com/categories/offers"
-        log("列表页扫描开始 (Category List)...", MAGENTA, "🔎")
+        target_urls = [
+            "https://lowendtalk.com/categories/offers",
+            "https://lowendtalk.com/categories/announcements"
+        ]
+        
+        log(f"列表页扫描开始 ({len(target_urls)} categories)...", MAGENTA, "🔎")
         start_t = time.time()
         
-        try:
-            resp = self.scraper.get(url, timeout=30)
-            if resp.status_code != 200: 
-                log(f"   ❌ 过盾失败 (Status: {resp.status_code})", RED)
-                return
-            else:
-                log(f"   🛡️ 过盾检测: 通过 (200 OK)", GREEN)
+        for url in target_urls:
+            try:
+                log(f"   -> 正在扫描: {url} ...", GRAY)
+                resp = self.scraper.get(url, timeout=30)
+                if resp.status_code != 200: 
+                    log(f"   ❌ 过盾失败 (Status: {resp.status_code})", RED)
+                    continue
 
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            
-            # Universal Selector
-            discussions = soup.select('.ItemDiscussion')
-            if not discussions: discussions = soup.find_all('li', class_='Discussion')
-            if not discussions: discussions = soup.select('tr.ItemDiscussion')
-            
-            total_count = len(discussions)
-            log(f"   📜 解析到 {total_count} 个主题，正在筛选...", GRAY)
-            
-            candidates = []
-            skipped_rss = 0
-            skipped_time = 0
-            
-            for d in discussions:
-                try:
-                    a_tag = d.select_one('.DiscussionName a') or d.find('h3', class_='DiscussionName').find('a')
-                    if not a_tag: continue
-                    
-                    link = a_tag['href']
-                    if not link.startswith('http'): link = "https://lowendtalk.com" + link
-                    title = a_tag.get_text(strip=True)
-                    
-                    if link in self.processed_urls_this_cycle: 
-                        skipped_rss += 1
-                        continue
-                    
-                    last_date_tag = d.find('span', class_='LastCommentDate')
-                    if not last_date_tag: last_date_tag = d.select_one('.DateUpdated')
-
-                    if last_date_tag:
-                        time_tag = last_date_tag.find('time')
-                        if time_tag and time_tag.has_attr('datetime'):
-                            dt_str = time_tag['datetime']
-                            last_active = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S%z")
-                            
-                            now = datetime.now(timezone.utc)
-                            if (now - last_active).total_seconds() < 86400 * 2: 
-                                creator = "Unknown"
-                                first_user = d.find('span', class_='FirstUser') or d.select_one('.Author a')
-                                if first_user: creator = first_user.get_text(strip=True)
-                                candidates.append({'link': link, 'title': title, 'creator': creator, 'last_page': 1})
-                            else: skipped_time += 1
-                except: continue
-
-            log(f"   ⚡ 筛选完成 | 命中候选: {len(candidates)} 个 (RSS跳过:{skipped_rss}/过期:{skipped_time})", GRAY)
-
-            if candidates:
-                log(f"   ⚠️ 启动深度抓取 (单线程)...", YELLOW)
-                for t in candidates:
-                    self.fetch_comments(t, silent=False)
+                soup = BeautifulSoup(resp.text, 'html.parser')
                 
-            duration = time.time() - start_t
-            log(f"列表页扫描完成 | 总耗时: {duration:.2f}s", MAGENTA)
+                discussions = soup.select('.ItemDiscussion')
+                if not discussions: discussions = soup.find_all('li', class_='Discussion')
+                if not discussions: discussions = soup.select('tr.ItemDiscussion')
+                
+                candidates = []
+                skipped_rss = 0
+                skipped_time = 0
+                
+                for d in discussions:
+                    try:
+                        a_tag = d.select_one('.DiscussionName a') or d.find('h3', class_='DiscussionName').find('a')
+                        if not a_tag: continue
+                        
+                        link = a_tag['href']
+                        if not link.startswith('http'): link = "https://lowendtalk.com" + link
+                        title = a_tag.get_text(strip=True)
+                        
+                        if link in self.processed_urls_this_cycle: 
+                            skipped_rss += 1
+                            continue
+                        
+                        last_date_tag = d.find('span', class_='LastCommentDate')
+                        if not last_date_tag: last_date_tag = d.select_one('.DateUpdated')
 
-        except Exception as e:
-            log(f"Category Scan Error: {e}", RED, "❌")
+                        if last_date_tag:
+                            time_tag = last_date_tag.find('time')
+                            if time_tag and time_tag.has_attr('datetime'):
+                                dt_str = time_tag['datetime']
+                                last_active = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S%z")
+                                
+                                now = datetime.now(timezone.utc)
+                                if (now - last_active).total_seconds() < 86400 * 2: 
+                                    creator = "Unknown"
+                                    first_user = d.find('span', class_='FirstUser') or d.select_one('.Author a')
+                                    if first_user: creator = first_user.get_text(strip=True)
+                                    candidates.append({'link': link, 'title': title, 'creator': creator, 'last_page': 1})
+                                else: skipped_time += 1
+                    except: continue
+
+                log(f"      ⚡ 命中候选: {len(candidates)} 个 (RSS跳过:{skipped_rss}/过期:{skipped_time})", GRAY)
+
+                if candidates:
+                    log(f"      ⚠️ 启动深度抓取 (单线程)...", YELLOW)
+                    for t in candidates:
+                        self.fetch_comments(t, silent=False)
+            
+            except Exception as e:
+                log(f"Category Scan Error ({url}): {e}", RED, "❌")
+                
+        duration = time.time() - start_t
+        log(f"列表页扫描完成 | 总耗时: {duration:.2f}s", MAGENTA)
 
     def start_monitoring(self):
         log("=== 监控服务启动 (AI Repush v6) ===", GREEN, "🚀")
@@ -968,6 +1247,7 @@ class ForumMonitor:
             self.processed_urls_this_cycle.clear()
             print(f"{GRAY}--------------------------------------------------{NC}")
             self.check_rss()
+            self.check_vip_threads() # New VIP Check
             self.check_category_list()
             self.update_heartbeat()
             
@@ -1231,7 +1511,7 @@ run_install() {
         local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
         jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
-           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.5-flash-lite", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600}}' > "$CONFIG_FILE"
+           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.5-flash-lite", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: []}}' > "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
     else
         run_update_config_prompt
@@ -1295,14 +1575,17 @@ show_menu() {
     printf "  %-4s %-12s %b%s%b\n" "8." "edit" "$GRAY" "修改密钥/模型" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "9." "frequency" "$GRAY" "调整频率" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "10." "threads" "$GRAY" "修改线程数" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "11." "status" "$GRAY" "详细状态" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "12." "logs" "$GRAY" "实时日志" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "11." "vip" "$GRAY" "管理VIP专线" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "12." "roles" "$GRAY" "管理监控角色" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "13." "status" "$GRAY" "详细状态" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "14." "logs" "$GRAY" "实时日志" "$NC"
 
     echo -e "${CYAN} [功能测试]${NC}"
-    printf "  %-4s %-12s %b%s%b\n" "13." "test-ai" "$GRAY" "测试 AI 连通性" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "14." "test-push" "$GRAY" "测试消息推送" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "15." "history" "$GRAY" "查看推送历史" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "16." "repush" "$GRAY" "手动推送活跃帖" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "15." "test-ai" "$GRAY" "测试 AI 连通性" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "16." "test-push" "$GRAY" "测试消息推送" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "17." "history" "$GRAY" "查看推送历史" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "18." "repush" "$GRAY" "手动推送活跃帖" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "19." "users" "$GRAY" "管理指定用户" "$NC"
 
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
     echo -e "  q. quit         退出"
@@ -1323,12 +1606,15 @@ main() {
             edit|8) run_edit_config ;;
             frequency|9) run_edit_frequency ;;
             threads|10) run_edit_threads ;;
-            status|11) run_status ;;
-            logs|12) run_logs ;;
-            test-ai|13) run_test_ai ;;
-            test-push|14) run_test_push ;;
-            history|15) run_view_history; read -n 1 -s -r -p "完成..." ;;
-            repush|16) run_repush_active; read -n 1 -s -r -p "完成..." ;;
+            vip|11) run_manage_vip ;;
+            roles|12) run_manage_roles ;;
+            status|13) run_status ;;
+            logs|14) run_logs ;;
+            test-ai|15) run_test_ai ;;
+            test-push|16) run_test_push ;;
+            history|17) run_view_history; read -n 1 -s -r -p "完成..." ;;
+            repush|18) run_repush_active; read -n 1 -s -r -p "完成..." ;;
+            users|19) run_manage_users ;;
             update|3) run_update ;; 
             monitor) run_monitor_logic ;;
             *) show_menu; exit 1 ;;
@@ -1350,12 +1636,15 @@ main() {
             8) run_edit_config; read -n 1 -s -r -p "完成..." ;;
             9) run_edit_frequency; read -n 1 -s -r -p "完成..." ;;
             10) run_edit_threads; read -n 1 -s -r -p "完成..." ;;
-            11) run_status; read -n 1 -s -r -p "完成..." ;;
-            12) run_logs; read -n 1 -s -r -p "完成..." ;;
-            13) run_test_ai; read -n 1 -s -r -p "完成..." ;;
-            14) run_test_push; read -n 1 -s -r -p "完成..." ;;
-            15) run_view_history; read -n 1 -s -r -p "按任意键返回..." ;;
-            16) run_repush_active; read -n 1 -s -r -p "按任意键返回..." ;;
+            11) run_manage_vip ;;
+            12) run_manage_roles ;;
+            13) run_status; read -n 1 -s -r -p "完成..." ;;
+            14) run_logs; read -n 1 -s -r -p "完成..." ;;
+            15) run_test_ai; read -n 1 -s -r -p "完成..." ;;
+            16) run_test_push; read -n 1 -s -r -p "完成..." ;;
+            17) run_view_history; read -n 1 -s -r -p "按任意键返回..." ;;
+            18) run_repush_active; read -n 1 -s -r -p "按任意键返回..." ;;
+            19) run_manage_users ;;
             q|Q) break ;;
             *) ;;
         esac
