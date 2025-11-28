@@ -1,90 +1,134 @@
+-----
+
+# 🚀 ForumMonitor - Intelligent LowEndTalk Monitor
+
+> **基于 Google Gemini AI 的 LowEndTalk 论坛智能监控系统**
+>
+> *高信噪比 | AI 意图识别 | 自动翻译 | 补货直达 | 商家身份过滤*
+
+**ForumMonitor** 是一个高度定制化的 VPS 优惠监控脚本。它不同于传统的关键词监控，而是引入了 **Google Gemini AI** 进行语义分析，能够精准识别商家的“补货”、“降价”、“闪购”等销售意图，并自动过滤掉无关的水贴和客套话。
 
 -----
 
-# 🤖 ForumMonitor: Cloudflare AI 驱动的 VPS 优惠信息监控与推送服务
+## ✨ 核心特性 (Key Features)
 
-`ForumMonitor` 是一个专为 VPS (Virtual Private Server) 爱好者设计的监控服务。它能够实时抓取特定论坛（默认为 LowEndTalk/LET）的促销帖子，利用 Cloudflare Workers AI 自动生成结构化的中文摘要、套餐推荐和优缺点分析，并通过 Pushplus 实时推送到您的微信、钉钉等通知渠道。
+  * **🧠 AI 驱动分析**: 使用 Google Gemini 2.5 Flash Lite 模型，将英文帖子自动翻译为中文摘要，并提取配置、价格等关键信息。
+  * **🛡️ 智能防风控 (Anti-WAF)**: 集成 `CloudScraper`，模拟真实浏览器指纹，有效绕过 Cloudflare 5秒盾和人机验证。
+  * **🎯 高精准回复监控**:
+      * **身份过滤**: 仅监控 **楼主 (Creator)**、**认证商家 (Provider)** 和 **Top Host** 的回复。
+      * **意图识别**: AI 自动判断回复内容是否包含“补货”、“加库存”、“新优惠码”等信息，过滤掉 "Thank you" 等无效回复。
+  * **📉 智能局部扫描**: 针对几百页的“传家宝”神帖，仅智能回溯扫描 **最后 3 页**，既防止漏掉翻页时的补货信息，又极大降低请求频率。
+  * **⚡ 精准楼层直达**: 推送链接采用 `comment/{id}/#Comment_{id}` 格式，点击通知直接跳转到具体楼层，方便抢购。
+  * **📱 增强型推送**:
+      * 支持 **Pushplus** HTML 格式推送。
+      * 动态标题：区分 `[商家] 楼主新回复` 和 `[商家] ⚡商家插播`。
+      * 自带高亮“下单地址”按钮。
 
-该项目由一个 Shell 管理脚本 (`ForumMonitor.sh`) 和 Python 核心代码组成，专注于 Debian 系统上的快速部署和稳定运行。
+-----
 
-## ✨ 主要特性
+## 🛠️ 运行逻辑 (How it Works)
 
-  * **实时监控与 AI 摘要:** 监控 LET/Offers RSS 源，并利用 Cloudflare AI (Llama-3) 自动翻译和结构化摘要。
-  * **富文本推送 (Pushplus):** 推送内容包含 **AI 结构化分析**、**下单超链接**、**简要概括**和**合适套餐推荐**。
-  * **全自动部署:** 一键安装所有依赖 (Python, MongoDB, systemd 服务) 和自动配置。
-  * **服务自愈 (Keepalive):** 基于 Crontab 和心跳文件 (`heartbeat.txt`) 的自动检测和重启机制。
-  * **完整的管理菜单:** 通过快捷命令 `fm` 即可进行启动、停止、配置、日志查看等操作。
+脚本采用 **Bash 管理 + Python 核心** 的架构，运行逻辑如下：
 
-## ⚙️ 部署要求
+1.  **双重发现机制**:
+      * **RSS 快速扫描** (多线程): 每 10 分钟并发检查 RSS Feed，秒级发现新帖。
+      * **列表页兜底** (单线程): 模拟浏览器访问 HTML 列表页，防止 RSS 延迟或漏抓。
+2.  **新帖处理**:
+      * Gemini AI 翻译全文 → 提取高性价比套餐 → 生成中文摘要 → 推送通知。
+3.  **回复/补货监控**:
+      * 锁定活跃帖子 → 计算最大页码 → 倒序扫描最后 3 页。
+      * **身份校验**: 回复人是否为 Creator / Provider / Top Host？
+      * **AI 裁判**: 内容是否涉及销售行为？(是 -\> 推送; 否 -\> 忽略)。
 
-  * 操作系统: **Debian 11/12** (推荐)。
-  * 权限: **Root 权限** (`sudo su` 或直接以 root 登录)。
-  * 依赖: Python 3, MongoDB (脚本自动安装), `jq`, `curl` 等。
+-----
 
-## 🚀 快速部署与安装
+## 📥 安装与部署 (Installation)
 
-### 步骤 1: 下载管理脚本
+### 前置要求
+
+  * 一台 Linux VPS (推荐 Debian 11/12 或 Ubuntu 20.04+)。
+  * **Google Gemini API Key** ([获取地址](https://aistudio.google.com/app/apikey))。
+  * **Pushplus Token** ([获取地址](https://www.pushplus.plus/))。
+
+### 一键安装
 
 ```bash
 # 下载脚本
-curl -Lo ForumMonitor.sh https://raw.githubusercontent.com/ypkin/RSS-ForumMonitor-LET/refs/heads/ForumMonitor-with-gemini/ForumMonitor.sh
-# 赋予执行权限
+curl -Lo ForumMonitor.sh https://raw.githubusercontent.com/ypkin/RSS-ForumMonitor-LET/refs/heads/ForumMonitor-with-gemini/ForumMonitor.sh 
+
+# 添加执行权限
 chmod +x ForumMonitor.sh
+
+# 运行安装向导
+./ForumMonitor.sh
 ```
 
-### 步骤 2: 获取用户参数
+进入菜单后，选择 `1. install`，根据提示输入 API Key 和 Token 即可完成部署。
 
-在运行安装命令前，您需要准备以下三个密钥：
+-----
 
-| 参数 | 作用 | 获取方法/说明 |
+## 🖥️ 命令菜单 (Menu)
+
+安装完成后，直接输入 `fm` 或 `./ForumMonitor.sh` 即可唤出管理菜单：
+
+| 选项 | 命令 | 描述 |
 | :--- | :--- | :--- |
-| **Pushplus Token** | 消息推送服务的唯一密钥。 | 登录 [Pushplus 官网](http://www.pushplus.plus/) 获取。 |
-| **Cloudflare API Token** | 用于调用 Workers AI 服务的密钥。 | 登录 Cloudflare -\> **我的个人资料** -\> **API 令牌**。需要授予 **Workers AI** 的 **编辑** 权限。 |
-| **Cloudflare Account ID** | Workers AI 服务的账户标识符。 | 登录 Cloudflare -\> **Workers 和 Pages** 概览页面顶部获取。 |
+| **1** | `install` | 安装依赖、MongoDB 并初始化配置 |
+| **3** | `update` | 在线更新脚本到最新版本 |
+| **6** | `restart` | 重启后台服务 |
+| **8** | `edit` | 修改 API Key、模型名称或 Token |
+| **9** | `frequency` | 修改轮询间隔 (默认 600秒) |
+| **10** | `threads` | 修改 RSS 扫描并发线程数 |
+| **12** | `logs` | 查看实时运行日志 |
+| **15** | `history` | 查看最近成功的推送记录 (MongoDB) |
+| **16** | `repush` | 手动触发最近活跃帖子的 AI 分析与推送 |
 
-### 步骤 3: 运行安装命令
+-----
 
-执行安装脚本。脚本将自动安装 MongoDB、Python 环境、创建服务文件并提示您输入上述参数。
+## 🔔 推送示例 (Notifications)
 
-```bash
- ./ForumMonitor.sh
+### 1\. 新帖推送 (New Thread)
 
-```
+> **标题**: LET新促销: [HostUS] Black Friday Special Ryzen VPS
+>
+> **内容**:
+>
+>   * **AI 甄选**: 1GB Ryzen KVM ($15/Year) - 性价比极高。
+>   * **VPS 列表**:
+>       * Plan A → $15/yr [下单地址]
+>       * Plan B → $25/yr [下单地址]
+>   * **优缺点分析**: ...
 
-在安装过程中，按照提示输入您的 `Pushplus Token`、`CF Token` 和 `CF Account ID`。服务安装成功后将自动启动。
+### 2\. 商家补货 (Restock Reply)
 
-## 📋 管理命令 (快捷方式: `fm`)
+> **标题**: [HostUS] ⚡商家(AlexanderM)插播
+>
+> **内容**:
+>
+>   * **AI 分析**: 检测到 1GB 套餐已补货，请尽快查看。
+>   * **链接**: [👉 查看回复 (直达楼层)]
 
-安装完成后，脚本会自动创建 `/usr/local/bin/fm` 快捷方式。您可以在终端中直接使用 `fm` 命令管理服务。
+-----
 
-| 编号 | 命令 | 描述 |
-| :---: | :--- | :--- |
-| **`fm`** | `fm` | 显示状态仪表盘和主菜单 (默认操作)。 |
-| **1** | `fm install` | 重新安装/重置服务（包括环境和依赖）。 |
-| **2** | `fm uninstall` | **彻底卸载**服务、依赖和所有数据。 |
-| **3** | `fm update` | 从 GitHub 更新此管理脚本到最新版本。 |
-| **6** | `fm restart` | 重启核心监控服务。 |
-| **7** | `fm keepalive` | **开启自动保活** (通过 Crontab 定时检查和重启)。 |
-| **8** | `fm edit` | 交互式地修改 Pushplus/CF API 密钥。 |
-| **9** | `fm frequency` | 修改脚本遍历论坛的间隔时间（秒，默认 600 秒）。 |
-| **10** | `fm status` | 查看 systemd 服务详细运行状态和内部心跳。 |
-| **11** | `fm logs` | 实时查看脚本日志（`journalctl -f`）。 |
-| **13** | `fm test-push` | 发送一条模拟的 AI 摘要消息到您的 Pushplus 渠道。 |
+## 📂 文件结构
 
-## 💡 常见问题与提示
+  * `/opt/forum-monitor/` - 程序主目录
+      * `core.py` - Python 核心逻辑 (爬虫/AI/数据库)
+      * `send.py` - 消息推送模块
+      * `data/config.json` - 配置文件
+      * `data/stats.json` - 统计数据
+      * `venv/` - Python 虚拟环境
 
-### 1\. 如何确保服务稳定运行?
+-----
 
-务必运行 `fm keepalive` (`fm 7`) 命令，这将在 Crontab 中添加一个每 5 分钟执行的检查任务，以确保服务进程意外退出或冻结时能被自动拉起。
+## 🤝 贡献与致谢
 
-### 2\. 如何修改 AI 摘要的格式?
+  * 项目逻辑基于 Discuz/Vanilla Forums 特性优化。
+  * 感谢 **LowEndTalk** 社区。
+  * AI 能力由 **Google Gemini** 提供。
 
-AI 摘要的格式由配置文件 `data/config.json` 中的 `thread_prompt` 变量控制。你可以通过 SSH 编辑此文件，然后运行 `fm restart` 使更改生效。
+-----
 
-### 3\. 如何调试推送?
+## ⚠️ 免责声明
 
-使用 `fm test-push` (`fm 13`) 命令可以立即发送一个测试通知，确认您的 Pushplus Token 配置是否正确，以及消息格式是否符合预期。
-
-### 4\. 为什么看不到日志颜色?
-
-脚本默认使用 `journalctl -u ... --output cat` 尝试强制显示颜色，以获得更好的阅读体验。如果仍无颜色，可能是您的终端环境不支持或已运行的 `fm logs` 命令没有设置 `TERM=xterm-256color`（服务文件中已设置）。
+本脚本仅供学习交流使用。请勿将扫描频率设置过高，以免对目标网站造成压力。使用本脚本产生的任何后果由使用者自行承担。
