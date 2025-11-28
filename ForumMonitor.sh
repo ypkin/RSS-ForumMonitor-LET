@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # --- ForumMonitor 管理脚本 (Gemini 2.5 Flash Lite Edition) ---
-# Version: 2025.11.27.17
+# Version: 2025.11.28.18
 # Features: 
+# [x] AI Prompt: Structured Extraction for Replies (Plan/Code/Link)
 # [x] Fix: Telegram Long Message Split (Auto-Chunking)
 # [x] UI: Emoji Title Indicators (🟢/🔵/🔴)
 # [x] Dual Push: Pushplus + Telegram
@@ -11,7 +12,6 @@
 # [x] Capture Creator, Patron Provider & Top Host Replies
 # [x] Exact Comment Permalinks
 # [x] Full AI Repush & History Log
-# [x] Auto Title Truncation
 #
 # --- (c) 2025 ---
 
@@ -106,7 +106,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v17: Emoji & TG Split)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v18: Structured Reply)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
@@ -489,8 +489,8 @@ run_update_config_prompt() {
         # Prompt 1: 新帖摘要 (增加 AI 甄选)
         local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
-        # Prompt 2: 回复过滤 (严格版)
-        local NEW_FILTER_PROMPT="你是一个冷酷的销售筛选器。请分析这条VPS论坛回复。只有当回复内容明确包含：**补货 (Restock)**、**加库存 (Added stock)**、**新套餐 (New Plan)**、**降价/闪购** 或 **新优惠码** 等实质性销售动作时，才输出简短中文摘要。\n\n对于以下情况，请必须直接回复 FALSE：\n1. 修复链接、修改排版、修正拼写错误 (Fixed link/typo)\n2. 回答技术问题、工单状态或一般性客服回复\n3. 没有任何具体库存变动的预告（如“Soon”或“Stay tuned”）\n4. 纯粹的感谢、闲聊或表情\n\n**如果不涉及具体的‘可购买’信息变动，一律 FALSE。**"
+        # Prompt 2: 回复过滤 (结构化提取版)
+        local NEW_FILTER_PROMPT="你是一个VPS销售分析师。请分析这条回复。如果没有具体的‘补货/降价/新优惠码/闪购’信息，直接回复 FALSE。如果包含销售信息，请务必按以下格式提取详情（不要用代码块）：\n\n📦 **套餐**: <核心/内存/硬盘/带宽> - <价格>\n🏷️ **优惠码**: <代码>\n🔗 **链接**: <URL>\n📝 **备注**: <简短说明>"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
            '.config.thread_prompt = $p | .config.filter_prompt = $f' \
@@ -500,7 +500,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (With Emojis & TG Split)..."
+    msg_info "写入 Python 核心代码 (With Structured Reply & Emojis)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -630,6 +630,8 @@ class ForumMonitor:
         text = text.replace('限时福利：', '<b>限时福利：</b>')
         text = text.replace('基础设施：', '<b>基础设施：</b>')
         text = text.replace('支付方式：', '<b>支付方式：</b>')
+        text = text.replace('📦 套餐', '<b>📦 套餐</b>')
+        text = text.replace('🏷️ 优惠码', '<b>🏷️ 优惠码</b>')
         text = text.replace('\n', '<br>')
         return text
 
@@ -685,6 +687,10 @@ class ForumMonitor:
             ai_resp = self.get_filter_from_ai(comment_data['message'])
             if "FALSE" not in ai_resp:
                 log(f"      🚀 关键词匹配! 推送中...", GREEN)
+                
+                # Render AI response (e.g. Bolding)
+                ai_resp_html = self.markdown_to_html(ai_resp)
+                
                 time_str = created_at_sh.strftime('%Y-%m-%d %H:%M')
                 model_name = self.config.get('model', 'Unknown')
                 
@@ -705,7 +711,7 @@ class ForumMonitor:
                     f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
                     f"📌 Source: {thread_data['title']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 {model_name}"
                     f"</div>"
-                    f"<div style='background:#f8f9fa;padding:10px;border:1px solid #eee;border-radius:5px;color:#333;'><b>🤖 AI 分析:</b><br>{ai_resp}</div>"
+                    f"<div style='background:#f8f9fa;padding:10px;border:1px solid #eee;border-radius:5px;color:#333;'><b>🤖 AI 分析:</b><br>{ai_resp_html}</div>"
                     f"<div style='margin-top:15px;'><a href='{comment_data['url']}' style='color:{header_color};'>👉 查看回复</a></div>"
                 )
                 
