@@ -1,14 +1,12 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v34: Menu Reordered) ---
-# Version: 2025.11.29.34
-# Features: 
+# --- ForumMonitor 管理脚本 (v35: Fix Empty Quote & AI Logic) ---
+# Version: 2025.11.29.35
+# Changes:
+# [x] Fix: Ignore empty/short messages (e.g., pure quotes/emojis) to prevent AI confusion.
+# [x] Fix: Stricter "FALSE" check to handle verbose AI responses (e.g., "Cannot analyze").
 # [x] Menu Reordered: Sequential 1-20
-# [x] Fix: Telegram Error 400 (Escape special chars in Titles/Usernames)
 # [x] Dual AI Support: Google Gemini / Cloudflare Workers AI
-# [x] Shared Prompt System
-# [x] Fix: Strip Blockquotes (防止引用内容重复)
-# [x] API Fix: Enhanced Rate Limit Handler
 #
 # --- (c) 2025 ---
 
@@ -110,7 +108,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v34: Menu Reordered)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v35: Fix Empty Quote)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -569,9 +567,9 @@ run_update_config_prompt() {
     fi
 }
 
-# --- 核心代码写入 (Python: Dual Engine + Title Escape Fix) ---
+# --- 核心代码写入 (Python: Fixed Empty Quote + Strict AI Check) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (Dual Engine + Title Fix)..."
+    msg_info "写入 Python 核心代码 (Fix: Empty Quote / AI Logic)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -743,7 +741,9 @@ class ForumMonitor:
         try:
             gemini_obj = self.model_filter if self.ai_provider == 'gemini' else None
             text = self.generate_ai_content(self.filter_prompt, description, gemini_obj).strip()
-            return "FALSE" if "FALSE" in text else text
+            # If the response is extremely short, assume it's valid unless it's literally "FALSE"
+            # But the caller logic also handles "FALSE" substring check.
+            return text
         except: return "FALSE"
 
     def markdown_to_html(self, text):
@@ -818,7 +818,13 @@ class ForumMonitor:
             if not comment_data['message'].strip(): return
 
             ai_resp = self.get_filter_from_ai(comment_data['message'])
-            if "FALSE" not in ai_resp:
+            
+            # --- FIX: STRICT FALSE CHECK ---
+            # 1. Convert to UPPER to catch False/false
+            # 2. Check for "cannot analyze"/"无法分析" to prevent AI garbage chatter
+            upper_resp = ai_resp.upper()
+            if "FALSE" not in upper_resp and "无法分析" not in ai_resp and "CANNOT" not in upper_resp:
+            # -------------------------------
                 log(f"      🚀 关键词匹配! 推送中...", GREEN)
                 ai_resp_html = self.markdown_to_html(ai_resp)
                 time_str = created_at_sh.strftime('%Y-%m-%d %H:%M')
@@ -902,6 +908,10 @@ class ForumMonitor:
                     message = msg_div.get_text(separator=' ', strip=True)
                 else: message = ""
                 
+                # --- FIX: SKIP EMPTY/SHORT MESSAGES ---
+                if not message or len(message) < 2: continue
+                # --------------------------------------
+
                 permalink_url = f"https://lowendtalk.com/discussion/comment/{comment_id}/#Comment_{comment_id}"
 
                 c_data = {
@@ -1078,7 +1088,7 @@ class ForumMonitor:
         log(f"列表页扫描完成 | 总耗时: {duration:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v34: Menu Reordered) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v35: Fix Empty Quote) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             cycle_start = time.time()
@@ -1232,7 +1242,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v34 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v35 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
