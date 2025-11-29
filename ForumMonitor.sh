@@ -1,12 +1,11 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v54: Fix Title Prefixes) ---
-# Version: 2025.11.29.54
+# --- ForumMonitor 管理脚本 (v55: Verbose Scan Logs) ---
+# Version: 2025.11.29.55
 # Changes:
-# [x] Fix: Added "🟢 [新帖]" prefix to thread notification body (for Telegram).
-# [x] Fix: Added "🟡 [Repush]" prefix to repush notification body.
-# [x] Fix: Added "🟢 [TEST]" prefix to test notification body.
-# [x] Fix: All previous critical fixes (Zombie Kill, Singleton, Toggles) included.
+# [x] Feature: Added explicit Object/Shield-Status/Result logs for page scanning.
+# [x] Config: Max threads limit set to 100.
+# [x] Fix: Log viewer exit behavior (0 to menu, Ctrl+C to shell).
 #
 # --- (c) 2025 ---
 
@@ -128,7 +127,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v54: Fix Title Prefixes)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v55: Verbose Logs)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -1027,7 +1026,12 @@ class ForumMonitor:
         try:
             time.sleep(1 if silent else 0.2)
             resp = self.scraper.get(thread_data['link'], timeout=15)
-            if resp.status_code != 200: return False
+            shield_status = "OK" if resp.status_code == 200 else f"FAIL({resp.status_code})"
+            
+            if resp.status_code != 200: 
+                log(f"   ❌ [Shield:{shield_status}] {thread_data['link']}", RED)
+                return False
+                
             soup = BeautifulSoup(resp.text, 'html.parser')
             max_page = self.get_max_page_from_soup(soup)
             target_limit = max(1, max_page - 2)
@@ -1041,10 +1045,10 @@ class ForumMonitor:
                     content = p_resp.text
                 has_recent = self.parse_let_comment(content, thread_data)
                 if not silent: 
-                    # RESTORED COLORFUL LOGS
+                    # UPDATED LOGS: Added Shield Status
                     author = thread_data.get('creator', 'Unknown')
                     title = thread_data.get('title', 'Unknown')
-                    log(f"   📄 {WHITE}@{author}{NC} {CYAN}{title[:30]}...{NC} | P{page}/{max_page} | {time.time()-p_start:.2f}s", GRAY)
+                    log(f"   📄 [Shield:{shield_status}] {WHITE}@{author}{NC} {CYAN}{title[:30]}...{NC} | P{page}/{max_page} | {time.time()-p_start:.2f}s", GRAY)
                 if not has_recent: break
             return True
         except: return False
@@ -1080,7 +1084,7 @@ class ForumMonitor:
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'xml')
                 items = soup.find_all('item')
-                log(f"RSS 扫描 | 目标: {len(items)} | 线程: {max_w}", BLUE, "📡")
+                log(f"RSS 扫描 | 目标: {len(items)} | 线程: {max_w} | 过盾: ✅ (200)", BLUE, "📡")
                 stats = {"SILENT": 0, "ACTIVE": 0, "NEW_PUSH": 0, "ERROR": 0, "OLD_SAVED": 0}
                 with ThreadPoolExecutor(max_workers=max_w) as executor:
                     futures = [executor.submit(self.process_rss_item, str(i)) for i in items]
@@ -1088,6 +1092,8 @@ class ForumMonitor:
                         res = f.result()
                         if res in stats: stats[res] += 1
                 log(f"RSS 完成 | 耗时: {time.time()-start_t:.2f}s | 新:{stats['NEW_PUSH']} 活:{stats['ACTIVE']} 静:{stats['SILENT']}", GREEN)
+            else:
+                log(f"RSS 扫描 | 过盾: ❌ ({resp.status_code})", RED, "📡")
         except Exception as e: log(f"RSS Error: {e}", RED, "❌")
 
     def check_vip_threads(self):
@@ -1111,10 +1117,15 @@ class ForumMonitor:
         log(f"列表页扫描 ({len(target_urls)})...", MAGENTA, "🔎")
         start_t = time.time()
         for url in target_urls:
-            log(f"   -> 扫描: {url.split('/')[-1]}...", GRAY)
+            obj_name = url.split('/')[-1]
             try:
                 resp = self.scraper.get(url, timeout=30)
-                if resp.status_code != 200: continue
+                
+                shield_state = "✅ 过盾成功" if resp.status_code == 200 else f"❌ 过盾失败 ({resp.status_code})"
+                if resp.status_code != 200:
+                    log(f"   -> [{obj_name}] {shield_state}", RED)
+                    continue
+                
                 soup = BeautifulSoup(resp.text, 'html.parser')
                 candidates = []
                 for d in soup.select('.ItemDiscussion') + soup.select('tr.ItemDiscussion'):
@@ -1133,16 +1144,17 @@ class ForumMonitor:
                                 candidates.append({'link': link, 'title': a.get_text(strip=True), 'creator': creator})
                     except: continue
                 
-                if not candidates:
-                    log(f"      💤 暂无漏网 (RSS已处理)", GRAY)
-                else:
-                    log(f"      ⚡ 发现 {len(candidates)} 个潜在遗漏", YELLOW)
-                    for t in candidates: self.fetch_comments(t, silent=False)
-            except: pass
+                result_msg = f"发现 {len(candidates)} 新候选项" if candidates else "无新候选项 (RSS已覆盖)"
+                color = YELLOW if candidates else GRAY
+                log(f"   -> [{obj_name}] {shield_state} | 结果: {result_msg}", color)
+
+                for t in candidates: self.fetch_comments(t, silent=False)
+            except Exception as e:
+                log(f"   -> [{obj_name}] 错误: {e}", RED)
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v54) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v55) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1306,7 +1318,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v54 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v55 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
