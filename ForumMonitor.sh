@@ -431,8 +431,8 @@ run_edit_threads() {
     check_jq
     local CUR=$(jq -r '.config.max_workers // 5' "$CONFIG_FILE")
     echo "当前: $CUR"
-    read -p "新线程数 (1-20): " NEW
-    if ! [[ "$NEW" =~ ^[0-9]+$ ]] || [ "$NEW" -lt 1 ] || [ "$NEW" -gt 20 ]; then msg_err "无效数字"; return 1; fi
+    read -p "新线程数 (1-100): " NEW
+    if ! [[ "$NEW" =~ ^[0-9]+$ ]] || [ "$NEW" -lt 1 ] || [ "$NEW" -gt 100 ]; then msg_err "无效数字"; return 1; fi
     jq --argjson v "$NEW" '.config.max_workers=$v' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     run_restart
 }
@@ -450,10 +450,11 @@ run_logs() {
     check_service_exists
     kill_zombie_loggers
     msg_info "正在加载实时日志..."
-    echo -e "${YELLOW}👉 按任意键停止查看并返回主菜单...${NC}"
+    echo -e "${YELLOW}👉 按 '0' 返回主菜单 | 按 'Ctrl+C' 退出脚本${NC}"
     echo -e "${GRAY}--------------------------------------------------${NC}"
     
     local LOG_PID=0
+    # 后台运行日志流
     journalctl -u $SERVICE_NAME -f -n 50 --output cat &
     LOG_PID=$!
     
@@ -463,15 +464,26 @@ run_logs() {
             wait "$LOG_PID" 2>/dev/null || true
         fi
     }
-    trap cleanup EXIT SIGINT
+    
+    # 捕获 SIGINT (Ctrl+C): 清理并直接退出脚本，回到Shell (不停止服务)
+    trap 'trap - EXIT; cleanup; echo -e "\n${GREEN}[Exit] 已退出脚本 (回到Shell)${NC}"; exit 0' SIGINT
+    # 捕获 EXIT: 确保异常退出时也清理日志进程
+    trap cleanup EXIT
 
-    read -n 1 -s -r
+    # 循环检测按键 '0'
+    while true; do
+        read -n 1 -s -r key
+        if [[ "$key" == "0" ]]; then
+            break
+        fi
+    done
     
     cleanup
-    trap - EXIT SIGINT
+    # 复原Trap
+    trap - SIGINT EXIT
     
     echo -e "\n${GREEN}[OK] 返回主菜单...${NC}"
-    sleep 1
+    sleep 0.5
 }
 
 run_view_history() {
@@ -1473,7 +1485,7 @@ main() {
             5) run_stop; read -n 1 -s -r -p "..." ;;
             6) run_restart; read -n 1 -s -r -p "..." ;;
             7) run_status; read -n 1 -s -r -p "..." ;;
-            8) run_logs; read -n 1 -s -r -p "..." ;;
+            8) run_logs ;;
             9) run_edit_config; read -n 1 -s -r -p "..." ;;
             10) run_ai_switch ;;
             11) run_edit_frequency; read -n 1 -s -r -p "..." ;;
