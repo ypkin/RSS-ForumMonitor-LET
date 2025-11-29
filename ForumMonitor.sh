@@ -1,16 +1,14 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (Gemini 2.5 Flash Lite Edition) ---
-# Version: 2025.11.28.29
+# --- ForumMonitor 管理脚本 (v34: Menu Reordered) ---
+# Version: 2025.11.29.34
 # Features: 
-# [x] API Fix: 429 Rate Limit Handler (Auto Retry + Backoff)
-# [x] Target User Monitor: Scan specific usernames
-# [x] Menu Reordered: 1-19 sequence
-# [x] Dynamic Role Manager (Creator/Provider/Admin...)
-# [x] VIP Monitor & Multi-Category Scan
-# [x] AI Prompt: Structured Extraction
-# [x] Fix: Telegram Long Message Split
-# [x] UI: Emoji Title Indicators
+# [x] Menu Reordered: Sequential 1-20
+# [x] Fix: Telegram Error 400 (Escape special chars in Titles/Usernames)
+# [x] Dual AI Support: Google Gemini / Cloudflare Workers AI
+# [x] Shared Prompt System
+# [x] Fix: Strip Blockquotes (防止引用内容重复)
+# [x] API Fix: Enhanced Rate Limit Handler
 #
 # --- (c) 2025 ---
 
@@ -97,23 +95,26 @@ show_dashboard() {
     local RESTART_COUNT=0
     [ -f "$RESTART_LOG_FILE" ] && RESTART_COUNT=$(wc -l < "$RESTART_LOG_FILE")
     
+    local CUR_PROVIDER="gemini"
     local CUR_MODEL="Unknown"
-    local CUR_THREADS="5"
-    local VIP_COUNT="0"
-    local USER_COUNT="0"
+    local CUR_FREQ="300"
+    
     if [ -f "$CONFIG_FILE" ]; then
-        CUR_MODEL=$(jq -r '.config.model // "gemini-2.5-flash-lite"' "$CONFIG_FILE")
-        CUR_THREADS=$(jq -r '.config.max_workers // 5' "$CONFIG_FILE")
-        VIP_COUNT=$(jq -r '.config.vip_threads | length' "$CONFIG_FILE")
-        USER_COUNT=$(jq -r '.config.monitored_usernames | length' "$CONFIG_FILE")
+        CUR_PROVIDER=$(jq -r '.config.ai_provider // "gemini"' "$CONFIG_FILE")
+        if [ "$CUR_PROVIDER" == "workers" ]; then
+             CUR_MODEL=$(jq -r '.config.cf_model // "llama-3.1-8b"' "$CONFIG_FILE")
+        else
+             CUR_MODEL=$(jq -r '.config.model // "gemini-2.0-flash-lite"' "$CONFIG_FILE")
+        fi
+        CUR_FREQ=$(jq -r '.config.frequency // 300' "$CONFIG_FILE")
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v29: Anti-429 RateLimit)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v34: Menu Reordered)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
-    printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行持续:" "$YELLOW" "$UPTIME" "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
-    printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "VIP监控数:" "$CYAN" "$VIP_COUNT" "$NC" "指定用户数:" "$CYAN" "$USER_COUNT" "$NC"
+    printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
+    printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "当前模型:" "$CYAN" "${CUR_MODEL:0:18}.." "$NC" "自动重启:" "$RED" "$RESTART_COUNT 次" "$NC"
     echo -e "${BLUE}================================================================${NC}"
 }
 
@@ -259,53 +260,27 @@ run_manage_users() {
 run_manage_roles() {
     check_service_exists
     check_jq
-    
-    # Initialize monitored_roles if missing (Default: all except 'other')
     jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","admin"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
     while true; do
         echo -e "\n${CYAN}--- 监控角色设置 ---${NC}"
-        echo -e "${GRAY}仅启用角色的回复会被送入 AI 分析。${NC}"
-        
-        has_role() {
-            jq -e --arg r "$1" '.config.monitored_roles | index($r)' "$CONFIG_FILE" >/dev/null
-        }
+        has_role() { jq -e --arg r "$1" '.config.monitored_roles | index($r)' "$CONFIG_FILE" >/dev/null; }
         
         echo -e "\n当前状态:"
+        if has_role "creator"; then S="✅"; else S="❌"; fi; echo -e "  1. $S 楼主 (Creator)"
+        if has_role "provider"; then S="✅"; else S="❌"; fi; echo -e "  2. $S 认证商家 (Provider)"
+        if has_role "top_host"; then S="✅"; else S="❌"; fi; echo -e "  3. $S Top Host"
+        if has_role "host_rep"; then S="✅"; else S="❌"; fi; echo -e "  4. $S Host Rep"
+        if has_role "admin"; then S="✅"; else S="❌"; fi; echo -e "  5. $S 管理员 (Administrator)"
+        if has_role "other"; then S="✅"; else S="❌"; fi; echo -e "  6. $S 其他 (All Others) ${RED}*全量监控 (慎开)${NC}"
         
-        if has_role "creator"; then S="✅"; else S="❌"; fi
-        echo -e "  1. $S 楼主 (Creator)"
-        
-        if has_role "provider"; then S="✅"; else S="❌"; fi
-        echo -e "  2. $S 认证商家 (Provider)"
-        
-        if has_role "top_host"; then S="✅"; else S="❌"; fi
-        echo -e "  3. $S Top Host"
-        
-        if has_role "host_rep"; then S="✅"; else S="❌"; fi
-        echo -e "  4. $S Host Rep"
-        
-        if has_role "admin"; then S="✅"; else S="❌"; fi
-        echo -e "  5. $S 管理员 (Administrator)"
-        
-        if has_role "other"; then S="✅"; else S="❌"; fi
-        echo -e "  6. $S 其他 (All Others) ${RED}*全量监控 (慎开)${NC}"
-        
-        echo -e "\n${YELLOW}操作选项:${NC}"
-        echo "  输入数字 (1-6) 切换状态"
-        echo "  q. 返回上级"
+        echo -e "\n${YELLOW}操作选项 (1-6 切换, q 返回):${NC}"
         read -p "请选择: " OPT
-        
         target=""
         case "$OPT" in
-            1) target="creator" ;;
-            2) target="provider" ;;
-            3) target="top_host" ;;
-            4) target="host_rep" ;;
-            5) target="admin" ;;
-            6) target="other" ;;
-            q|Q) return ;;
-            *) msg_err "无效选项"; continue ;;
+            1) target="creator" ;; 2) target="provider" ;; 3) target="top_host" ;;
+            4) target="host_rep" ;; 5) target="admin" ;; 6) target="other" ;;
+            q|Q) return ;; *) continue ;;
         esac
         
         if [ -n "$target" ]; then
@@ -320,35 +295,83 @@ run_manage_roles() {
     done
 }
 
+run_ai_switch() {
+    check_service_exists
+    check_jq
+    
+    local CUR_PROVIDER=$(jq -r '.config.ai_provider // "gemini"' "$CONFIG_FILE")
+    local CUR_G_KEY=$(jq -r '.config.gemini_api_key' "$CONFIG_FILE")
+    local CUR_G_MODEL=$(jq -r '.config.model // "gemini-2.0-flash-lite"' "$CONFIG_FILE")
+    
+    local CUR_CF_ACC=$(jq -r '.config.cf_account_id // ""' "$CONFIG_FILE")
+    local CUR_CF_TOK=$(jq -r '.config.cf_api_token // ""' "$CONFIG_FILE")
+    local CUR_CF_MODEL=$(jq -r '.config.cf_model // "@cf/meta/llama-3.1-8b-instruct"' "$CONFIG_FILE")
+
+    echo -e "\n${CYAN}--- AI 引擎切换 (AI Switch) ---${NC}"
+    echo -e "当前使用: ${GREEN}${CUR_PROVIDER^^}${NC}"
+    echo -e "${GRAY}注意: 两种 AI 共享同一套提示词 (Prompt)，无需单独修改。${NC}\n"
+
+    echo "  1. 使用 Google Gemini (推荐)"
+    echo "  2. 使用 Cloudflare Workers AI"
+    echo "  3. 返回"
+    read -p "请选择 AI 提供商: " SEL
+    
+    case "$SEL" in
+        1)
+            echo -e "\n${BLUE}--- 配置 Gemini ---${NC}"
+            read -p "API Key (当前: ***${CUR_G_KEY: -6}): " N_KEY
+            read -p "Model (当前: $CUR_G_MODEL): " N_MODEL
+            
+            [ -z "$N_KEY" ] && N_KEY="$CUR_G_KEY"
+            [ -z "$N_MODEL" ] && N_MODEL="$CUR_G_MODEL"
+            
+            jq --arg k "$N_KEY" --arg m "$N_MODEL" \
+               '.config.ai_provider="gemini" | .config.gemini_api_key=$k | .config.model=$m' \
+               "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            msg_ok "已切换至 Gemini，正在重启服务..."
+            run_restart
+            ;;
+        2)
+            echo -e "\n${BLUE}--- 配置 Workers AI ---${NC}"
+            echo -e "${GRAY}需要 Cloudflare Account ID 和 API Token (需有 Workers AI 权限)${NC}"
+            read -p "Account ID (当前: $CUR_CF_ACC): " N_ACC
+            read -p "API Token (当前: ***${CUR_CF_TOK: -6}): " N_TOK
+            read -p "Model (当前: $CUR_CF_MODEL): " N_MODEL
+            
+            [ -z "$N_ACC" ] && N_ACC="$CUR_CF_ACC"
+            [ -z "$N_TOK" ] && N_TOK="$CUR_CF_TOK"
+            [ -z "$N_MODEL" ] && N_MODEL="$CUR_CF_MODEL"
+            
+            jq --arg a "$N_ACC" --arg t "$N_TOK" --arg m "$N_MODEL" \
+               '.config.ai_provider="workers" | .config.cf_account_id=$a | .config.cf_api_token=$t | .config.cf_model=$m' \
+               "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            msg_ok "已切换至 Workers AI，正在重启服务..."
+            run_restart
+            ;;
+        *) return ;;
+    esac
+}
+
 run_edit_config() {
     check_service_exists
     check_jq
-    echo "--- 修改配置 (直接回车保留原值) ---"
+    echo "--- 修改基础配置 (直接回车保留原值) ---"
     
     local C_PT=$(jq -r '.config.pushplus_token' "$CONFIG_FILE")
     local C_TG_TOK=$(jq -r '.config.telegram_bot_token // ""' "$CONFIG_FILE")
     local C_TG_ID=$(jq -r '.config.telegram_chat_id // ""' "$CONFIG_FILE")
-    local C_GK=$(jq -r '.config.gemini_api_key' "$CONFIG_FILE")
-    local C_MODEL=$(jq -r '.config.model // "gemini-2.5-flash-lite"' "$CONFIG_FILE")
 
     read -p "Pushplus Token (当前: ${C_PT: -6}): " N_PT
     echo -e "${YELLOW}Telegram 配置 (留空则不启用)${NC}"
     read -p "Telegram Bot Token (当前: ${C_TG_TOK:0:9}...): " N_TG_TOK
     read -p "Telegram Chat ID (当前: $C_TG_ID): " N_TG_ID
     
-    echo -e "${GRAY}--------------------------------${NC}"
-    read -p "Gemini API Key (当前: ***${C_GK: -6}): " N_GK
-    read -p "Gemini Model Name (当前: $C_MODEL): " N_MODEL
-
     [ -z "$N_PT" ] && N_PT="$C_PT"
     [ -z "$N_TG_TOK" ] && N_TG_TOK="$C_TG_TOK"
     [ -z "$N_TG_ID" ] && N_TG_ID="$C_TG_ID"
-    [ -z "$N_GK" ] && N_GK="$C_GK"
-    [ -z "$N_MODEL" ] && N_MODEL="$C_MODEL"
 
-    # 使用临时文件确保原子写入
-    jq --arg a "$N_PT" --arg b "$N_GK" --arg c "$N_MODEL" --arg d "$N_TG_TOK" --arg e "$N_TG_ID" \
-       '.config.pushplus_token=$a|.config.gemini_api_key=$b|.config.model=$c|.config.telegram_bot_token=$d|.config.telegram_chat_id=$e' \
+    jq --arg a "$N_PT" --arg d "$N_TG_TOK" --arg e "$N_TG_ID" \
+       '.config.pushplus_token=$a|.config.telegram_bot_token=$d|.config.telegram_chat_id=$e' \
        "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     
     msg_ok "配置已更新，正在重启服务..."
@@ -360,7 +383,7 @@ run_edit_frequency() {
     check_jq
     local CUR=$(jq -r '.config.frequency' "$CONFIG_FILE")
     echo "当前轮询间隔: $CUR 秒"
-    read -p "新间隔 (秒): " NEW
+    read -p "新间隔 (秒, 建议 >= 300): " NEW
     if ! [[ "$NEW" =~ ^[0-9]+$ ]]; then msg_err "无效数字"; return 1; fi
     
     jq --argjson v "$NEW" '.config.frequency=$v' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
@@ -373,17 +396,10 @@ run_edit_threads() {
     check_jq
     local CUR=$(jq -r '.config.max_workers // 5' "$CONFIG_FILE")
     echo "当前 RSS 并发线程数: $CUR"
-    echo -e "${YELLOW}提示: 仅影响 RSS 扫描。列表页扫描已锁定为单线程以防封禁。${NC}"
+    echo -e "${YELLOW}提示: 高并发易触发 429。建议设置 1-3。${NC}"
     read -p "新 RSS 线程数 (1-20): " NEW
-    
-    if ! [[ "$NEW" =~ ^[0-9]+$ ]]; then 
-        msg_err "无效数字"; return 1; 
-    fi
-    
-    if [ "$NEW" -lt 1 ] || [ "$NEW" -gt 20 ]; then
-        msg_err "数值超出范围，请输入 1-20 之间的数字。"
-        return 1
-    fi
+    if ! [[ "$NEW" =~ ^[0-9]+$ ]]; then msg_err "无效数字"; return 1; fi
+    if [ "$NEW" -lt 1 ] || [ "$NEW" -gt 20 ]; then msg_err "数值超出范围"; return 1; fi
     
     jq --argjson v "$NEW" '.config.max_workers=$v' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     msg_ok "线程数已更新为: $NEW"
@@ -409,50 +425,21 @@ run_logs() {
 run_view_history() {
     check_service_exists
     msg_info "正在查询最近成功的推送记录 (Limit 20)..."
-    
     local PY_SCRIPT="
-import pymongo
-import os
+import pymongo, os
 from datetime import datetime
-import sys
-
 try:
     client = pymongo.MongoClient(os.getenv('MONGO_HOST', 'mongodb://localhost:27017/'))
-    db = client['forum_monitor']
-    logs = list(db['push_logs'].find().sort('created_at', -1).limit(20))
-    
-    sep = '-' * 85
-    print('')
-    print(sep)
-    print(f'| {\"Time\":<19} | {\"Type\":<8} | {\"Title (Provider/Subject)\":<50} |')
-    print(sep)
-    
-    if not logs:
-        print('| No push history found yet.                                                        |')
-    
-    for log in logs:
-        time_str = log.get('created_at', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
-        l_type = log.get('type', 'UNK')
-        title = log.get('title', 'No Title')
-        if len(title) > 48: title = title[:45] + '...'
-        
-        c_green = '\033[0;32m'
-        c_cyan = '\033[0;36m'
-        c_yellow = '\033[0;33m'
-        c_gray = '\033[0;90m'
-        c_end = '\033[0m'
-        
-        color = c_gray
-        if l_type == 'thread': color = c_green
-        elif l_type == 'reply': color = c_cyan
-        elif l_type == 'repush': color = c_yellow
-
-        print(f'| {time_str:<19} | {color}{l_type:<8}{c_end} | {title:<50} |')
-    
-    print(sep)
-    print('')
-except Exception as e:
-    print(f'Error: {e}')
+    logs = list(client['forum_monitor']['push_logs'].find().sort('created_at', -1).limit(20))
+    print('-'*85 + f'\n| {\"Time\":<19} | {\"Type\":<8} | {\"Title\":<50} |\n' + '-'*85)
+    if not logs: print('| No push history found.')
+    for l in logs:
+        ts = l.get('created_at', datetime.now()).strftime('%Y-%m-%d %H:%M:%S')
+        t = l.get('title', 'No Title')[:45]
+        c = '\033[0;32m' if l.get('type')=='thread' else '\033[0;36m'
+        print(f'| {ts:<19} | {c}{l.get(\"type\", \"UNK\"):<8}\033[0m | {t:<50} |')
+    print('-'*85)
+except Exception as e: print(e)
 "
     "$VENV_DIR/bin/python" -c "$PY_SCRIPT"
 }
@@ -460,160 +447,58 @@ except Exception as e:
 run_repush_active() {
     check_service_exists
     msg_info "正在检索活跃帖子并请求 AI 重新分析 (Single-Thread)..."
-    msg_warn "注意：为了生成完整报告，系统将重新调用 Gemini API。"
-    msg_warn "为防风控，限制处理最新的 3 条 Active 记录。"
-    
     local PY_SCRIPT="
-import pymongo
-import os
-import sys
-import time
-from datetime import datetime, timedelta, timezone
-
-# Add APP_DIR to path to import core/send
+import pymongo, os, sys, time
+from datetime import datetime
 sys.path.append('$APP_DIR')
 from core import ForumMonitor, SHANGHAI
-
 try:
-    # Instantiate Core to use Gemini & DB Logic
-    monitor = ForumMonitor('$CONFIG_FILE')
-    
-    # Logic: Get threads sorted by pub_date DESC
-    cursor = monitor.db['threads'].find().sort('pub_date', -1).limit(10)
-    
-    count = 0
-    max_repush = 3
-    
-    print(f'Scanning and re-analyzing threads (Limit: {max_repush})...')
-    
+    m = ForumMonitor('$CONFIG_FILE')
+    cursor = m.db['threads'].find().sort('pub_date', -1).limit(10)
+    cnt = 0
+    print('Scanning (Limit 3)...')
     for t in cursor:
-        if count >= max_repush: break
-        
-        pub_date = t.get('pub_date')
-        if not pub_date: continue
-        
-        # Handle timezone mixing
-        now = datetime.now(pub_date.tzinfo) if pub_date.tzinfo else datetime.utcnow()
-        age = (now - pub_date).total_seconds()
-        
-        if age < 86400: # 24 hours
-            title = t.get('title', 'No Title')
-            link = t.get('link', '#')
-            creator = t.get('creator', 'Unknown')
-            desc = t.get('description', '')
+        if cnt >= 3: break
+        age = (datetime.now(t['pub_date'].tzinfo) - t['pub_date']).total_seconds()
+        if age < 86400:
+            print(f' -> 🤖 Analyzing: {t.get(\"title\")[:30]}...')
+            raw = m.get_summarize_from_ai(t.get('description',''))
+            html = m.markdown_to_html(raw).replace('[ORDER_LINK_HERE]','')
+            ts = t['pub_date'].astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M')
+            model = m.config.get('ai_provider', 'gemini')
             
-            print(f' -> 🤖 Analyzing: {title[:40]}...')
+            # --- FIX: ESCAPE TITLE & CREATOR ---
+            safe_title = t.get('title', '').replace('<', '&lt;').replace('>', '&gt;')
+            safe_creator = t.get('creator', 'Unknown').replace('<', '&lt;').replace('>', '&gt;')
+            # -----------------------------------
             
-            # 1. Call AI Summary
-            raw_summary = monitor.get_summarize_from_ai(desc)
+            content = f\"<h4 style='color:#d63384;margin:0;'>🔄 [Repush] {safe_title}</h4><div style='font-size:12px;color:#666;'>👤 {safe_creator} | 🕒 {ts} | 🤖 {model}</div><div style='font-size:14px;color:#333;'>{html}</div><div style='margin-top:10px;'><a href='{t['link']}'>👉 查看原帖</a></div>\"
             
-            # 2. Convert Markdown to HTML
-            html_summary = monitor.markdown_to_html(raw_summary)
-            
-            # 3. Clean up placeholders (Since we don't have extracted links list here easily)
-            html_summary = html_summary.replace('[ORDER_LINK_HERE]', '')
-            
-            # 4. Build Full HTML Payload (Matching core.py)
-            pub_date_sh = pub_date.astimezone(SHANGHAI) if pub_date.tzinfo else pub_date
-            time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
-            model_name = monitor.config.get('model', 'Unknown')
-            
-            msg_content = (
-                f\"<h4 style='color:#d63384;margin-bottom:5px;margin-top:0;'>🔄 [Repush] {title}</h4>\"
-                f\"<div style='font-size:12px;color:#666;margin-bottom:10px;'>\"
-                f\"👤 Author: {creator} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 {model_name}\"
-                f\"</div><div style='font-size:14px;line-height:1.6;color:#333;'>{html_summary}</div>\"
-                f\"<div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='{link}' style='display:inline-block;padding:8px 15px;background:#d63384;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>\"
-            )
-            
-            # 5. Send (Title truncated automatically by send.py if needed)
-            if monitor.notifier.send_html_message(f'🟡 [Repush] {title}', msg_content):
-                monitor.log_push_history('repush', title, link)
-                print('    ✅ Success')
-                count += 1
-            else:
-                print('    ❌ Failed to send')
-                
-            # Sleep slightly between repushes to be safe
+            if m.notifier.send_html_message(f'🟡 [Repush] {safe_title}', content):
+                m.log_push_history('repush', safe_title, t['link'])
+                print('    ✅ Success'); cnt += 1
             time.sleep(2)
-        else:
-            pass
-            
-    if count == 0:
-        print('No recent active threads found ( < 24h ).')
-    else:
-        print(f'Done. AI Repushed {count} threads.')
-
-except Exception as e:
-    print(f'Error: {e}')
+    print(f'Done. Repushed {cnt}.')
+except Exception as e: print(f'Error: {e}')
 "
     "$VENV_DIR/bin/python" -c "$PY_SCRIPT"
 }
 
-# --- 测试功能 ---
-
 run_test_push() {
     check_service_exists
-    check_jq
     msg_info "正在发送全格式测试通知..."
-    
-    local TITLE="🟡 [TEST] 模拟: Gemini 2.5 Flash Lite"
-    local CUR_TIME=$(date "+%Y-%m-%d %H:%M")
-    local MODEL=$(jq -r '.config.model // "gemini-2.5-flash-lite"' "$CONFIG_FILE")
-    
-    local CONTENT="<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>📢 [TEST] History Log Verification</h4><div style='font-size:12px;color:#666;margin-bottom:10px;'>👤 Author: Admin <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 $CUR_TIME (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 $MODEL</div><div style='font-size:14px;line-height:1.6;color:#333;'>这是一条测试消息，发送成功后将自动写入 MongoDB 的 push_logs 集合，以便在菜单 Option 15 中查看。<br><br><b>验证点：</b><br>1. 手机/微信是否收到推送。<br>2. 菜单 15 是否显示此条记录。</div>"
-    
-    local PY_COMMAND="
-import sys
-import os
-import datetime
-from pymongo import MongoClient
-sys.path.append('$APP_DIR')
-from send import NotificationSender
-
-sender = NotificationSender('$CONFIG_FILE')
-success = sender.send_html_message('$TITLE', \"\"\"$CONTENT\"\"\")
-
-if success:
-    print('✅ 推送发送成功')
-    try:
-        client = MongoClient(os.getenv('MONGO_HOST', 'mongodb://localhost:27017/'))
-        db = client['forum_monitor']
-        db['push_logs'].insert_one({
-            'type': 'test',
-            'title': '$TITLE',
-            'url': 'https://lowendtalk.com',
-            'created_at': datetime.datetime.now()
-        })
-        print('✅ 已写入历史记录 (push_logs)')
-    except Exception as e:
-        print(f'❌ 写入历史记录失败: {e}')
-else:
-    print('❌ 推送发送失败')
-"
-    
-    "$VENV_DIR/bin/python" -c "$PY_COMMAND"
+    local PY_CMD="import sys; sys.path.append('$APP_DIR'); from send import NotificationSender; s=NotificationSender('$CONFIG_FILE'); s.send_html_message('🟡 [TEST] 模拟推送', '<b>测试消息</b><br>如果收到此消息，说明推送通道正常。'); print('✅ 发送尝试完成')"
+    "$VENV_DIR/bin/python" -c "$PY_CMD"
 }
 
 run_test_ai() {
     check_service_exists
-    check_jq
-    msg_info "正在测试 Gemini API 连通性..."
-    local CMD="import sys; sys.path.append('$APP_DIR'); from core import ForumMonitor; print(ForumMonitor(config_path='$CONFIG_FILE').get_filter_from_ai(\"This is a test message to check connectivity.\"))"
-    
-    set +e
+    msg_info "正在测试 AI 连通性..."
+    local CMD="import sys; sys.path.append('$APP_DIR'); from core import ForumMonitor; print(ForumMonitor(config_path='$CONFIG_FILE').get_filter_from_ai(\"Test message.\"))"
     local RES=$("$VENV_DIR/bin/python" -c "$CMD" 2>&1)
-    set -e
-    
     echo "API Response: $RES"
-    if [[ "$RES" == *"FALSE"* ]]; then
-        msg_ok "AI 响应正常 (拦截测试成功)"
-    else
-        msg_ok "AI 响应成功 (内容生成)"
-    fi
+    if [[ "$RES" == *"FALSE"* ]] || [[ -n "$RES" ]]; then msg_ok "AI 响应成功"; else msg_err "AI 响应为空/失败"; fi
 }
-
-# --- 维护功能 ---
 
 run_update() {
     local P=$(realpath "$0")
@@ -638,14 +523,11 @@ run_monitor_logic() {
     check_jq
     if ! systemctl is-active --quiet $SERVICE_NAME; then return 0; fi
     if [ ! -f "$HEARTBEAT_FILE" ]; then return 0; fi
-    
     local LAST=$(cat "$HEARTBEAT_FILE")
     local FREQ=$(jq -r '.config.frequency // 600' "$CONFIG_FILE")
     local DIFF=$(($(date +%s) - LAST))
-    
     if [ "$DIFF" -gt "$(($FREQ + 300))" ]; then
-        echo "$(date): [Watchdog] 服务僵死 (${DIFF}s 未响应). 正在重启..."
-        echo "$(date '+%Y-%m-%d %H:%M:%S')" >> "$RESTART_LOG_FILE"
+        echo "$(date): [Watchdog] 服务僵死重启" >> "$RESTART_LOG_FILE"
         systemctl restart $SERVICE_NAME
     fi
 }
@@ -653,7 +535,6 @@ run_monitor_logic() {
 run_setup_keepalive() {
     msg_info "配置 Crontab 保活任务..."
     local CMD="*/5 * * * * $(realpath "$0") monitor >> $APP_DIR/monitor.log 2>&1"
-    
     (crontab -l 2>/dev/null | grep -v "monitor"; echo "$CMD") | crontab -
     msg_ok "已添加每5分钟保活检测"
 }
@@ -671,19 +552,15 @@ run_uninstall() {
 
 run_update_config_prompt() {
     if [ -f "$CONFIG_FILE" ]; then
-        # Ensure vip_threads array exists
         jq 'if .config.vip_threads == null then .config.vip_threads = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-        
-        # Ensure monitored_usernames array exists
         jq 'if .config.monitored_usernames == null then .config.monitored_usernames = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-        
-        # Ensure monitored_roles array exists (Default: all except other)
         jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","admin"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-
-        # Prompt 1: 新帖摘要 (增加 AI 甄选)
-        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
-        # Prompt 2: 回复过滤 (福利兼容版)
+        # Ensure AI fields exist
+        jq 'if .config.ai_provider == null then .config.ai_provider = "gemini" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+        jq 'if .config.cf_model == null then .config.cf_model = "@cf/meta/llama-3.1-8b-instruct" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** (Sales) 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
@@ -692,9 +569,9 @@ run_update_config_prompt() {
     fi
 }
 
-# --- 核心代码写入 (Python) ---
+# --- 核心代码写入 (Python: Dual Engine + Title Escape Fix) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (Anti-429 + Rate Limit)..."
+    msg_info "写入 Python 核心代码 (Dual Engine + Title Fix)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -743,12 +620,10 @@ class ForumMonitor:
         self.db = self.mongo_client['forum_monitor']
         self.threads_collection = self.db['threads']
         self.comments_collection = self.db['comments']
-        # 新增推送记录集合
         self.push_logs = self.db['push_logs']
         
         self.processed_urls_this_cycle = set()
         
-        # CloudScraper Init
         self.scraper = cloudscraper.create_scraper(
             browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
         )
@@ -758,16 +633,29 @@ class ForumMonitor:
             'Referer': 'https://lowendtalk.com/',
         })
 
-        # Gemini Init
-        try:
-            api_key = self.config.get('gemini_api_key')
-            model_name = self.config.get('model', 'gemini-2.5-flash-lite')
-            if api_key:
-                genai.configure(api_key=api_key)
-                self.model_summary = genai.GenerativeModel(model_name, system_instruction=self.config.get('thread_prompt', ''))
-                self.model_filter = genai.GenerativeModel(model_name, system_instruction=self.config.get('filter_prompt', ''))
-                log(f"Gemini Loaded ({model_name})", GREEN, "🧠")
-        except Exception: pass
+        # --- AI Engine Init ---
+        self.ai_provider = self.config.get('ai_provider', 'gemini')
+        self.thread_prompt = self.config.get('thread_prompt', '')
+        self.filter_prompt = self.config.get('filter_prompt', '')
+
+        if self.ai_provider == 'gemini':
+            try:
+                api_key = self.config.get('gemini_api_key')
+                model_name = self.config.get('model', 'gemini-2.0-flash-lite')
+                if api_key:
+                    genai.configure(api_key=api_key)
+                    self.model_summary = genai.GenerativeModel(model_name, system_instruction=self.thread_prompt)
+                    self.model_filter = genai.GenerativeModel(model_name, system_instruction=self.filter_prompt)
+                    log(f"AI Engine: Gemini ({model_name})", GREEN, "🧠")
+            except Exception as e: log(f"Gemini Init Error: {e}", RED)
+        elif self.ai_provider == 'workers':
+            self.cf_account = self.config.get('cf_account_id')
+            self.cf_token = self.config.get('cf_api_token')
+            self.cf_model = self.config.get('cf_model', '@cf/meta/llama-3.1-8b-instruct')
+            if self.cf_account and self.cf_token:
+                log(f"AI Engine: Workers AI ({self.cf_model})", GREEN, "🧠")
+            else:
+                log("AI Engine: Workers AI Config Missing!", RED)
 
         try:
             self.threads_collection.create_index('link', unique=True)
@@ -793,45 +681,68 @@ class ForumMonitor:
     def log_push_history(self, p_type, title, url):
         try:
             self.push_logs.insert_one({
-                'type': p_type,
-                'title': title,
-                'url': url,
+                'type': p_type, 'title': title, 'url': url,
                 'created_at': datetime.now(SHANGHAI)
             })
         except: pass
 
-    # --- AI & Tooling (Smart Retry Wrapper) ---
-    def call_gemini_safe(self, model_instance, content):
-        retries = 3
-        delay = 5
+    # --- AI Dispatcher (Dual Engine) ---
+    def generate_ai_content(self, system_prompt, user_content, gemini_model_instance=None):
+        retries = 5
+        delay = 10
         
         for i in range(retries):
             try:
                 # Basic throttle
-                time.sleep(2) 
-                response = model_instance.generate_content(content)
-                return response.text
+                time.sleep(1) 
+                
+                if self.ai_provider == 'gemini':
+                    if gemini_model_instance:
+                        response = gemini_model_instance.generate_content(user_content)
+                        return response.text
+                    else: return "Gemini Not Initialized"
+                
+                elif self.ai_provider == 'workers':
+                    url = f"https://api.cloudflare.com/client/v4/accounts/{self.cf_account}/ai/run/{self.cf_model}"
+                    headers = {"Authorization": f"Bearer {self.cf_token}"}
+                    payload = {
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_content}
+                        ]
+                    }
+                    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        return res_json.get("result", {}).get("response", "FALSE")
+                    else:
+                        raise Exception(f"CF API Error: {resp.status_code} {resp.text}")
+
             except Exception as e:
                 err_str = str(e)
                 if "429" in err_str or "quota" in err_str.lower():
-                    log(f"⚠️ AI Quota Exceeded (429). Retrying in {delay}s... ({i+1}/{retries})", YELLOW)
+                    log(f"⚠️ AI Rate Limit (429). Retrying in {delay}s... ({i+1}/{retries})", YELLOW)
                     time.sleep(delay)
-                    delay *= 2 # Exponential backoff
+                    delay = int(delay * 1.5)
                 else:
                     log(f"❌ AI Error: {e}", RED)
-                    return "FALSE" # Non-retryable error
+                    return "FALSE"
         
         log(f"❌ AI Failed after {retries} retries.", RED)
         return "FALSE"
 
     def get_summarize_from_ai(self, description):
         try: 
-            return self.call_gemini_safe(self.model_summary, description)
+            # For Gemini, system prompt is set at init, pass object.
+            # For Workers, system prompt is passed here.
+            gemini_obj = self.model_summary if self.ai_provider == 'gemini' else None
+            return self.generate_ai_content(self.thread_prompt, description, gemini_obj)
         except: return "AI Error"
 
     def get_filter_from_ai(self, description):
         try:
-            text = self.call_gemini_safe(self.model_filter, description).strip()
+            gemini_obj = self.model_filter if self.ai_provider == 'gemini' else None
+            text = self.generate_ai_content(self.filter_prompt, description, gemini_obj).strip()
             return "FALSE" if "FALSE" in text else text
         except: return "FALSE"
 
@@ -859,7 +770,7 @@ class ForumMonitor:
             pub_date_sh = thread_data['pub_date'].astimezone(SHANGHAI)
 
             if (now_sh - pub_date_sh).total_seconds() <= 86400:
-                log(f"Gemini 正在摘要: {thread_data['title'][:20]}...", YELLOW, "🤖")
+                log(f"AI 正在摘要: {thread_data['title'][:20]}...", YELLOW, "🤖")
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
                 html_summary = self.markdown_to_html(raw_summary)
                 
@@ -875,20 +786,23 @@ class ForumMonitor:
                 else: html_summary = html_summary.replace("[ORDER_LINK_HERE]", "")
 
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
-                model_name = self.config.get('model', 'Unknown')
                 
-                # --- UPDATE: Emoji Title for New Thread ---
-                push_title = f"🟢 [新帖] {thread_data['title']}"
+                # --- FIX: ESCAPE TITLE & CREATOR ---
+                safe_title = thread_data['title'].replace('<', '&lt;').replace('>', '&gt;')
+                safe_creator = thread_data['creator'].replace('<', '&lt;').replace('>', '&gt;')
+                # -----------------------------------
+                
+                push_title = f"🟢 [新帖] {safe_title}"
+                model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
 
                 msg_content = (
-                    f"<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>{thread_data['title']}</h4>"
+                    f"<h4 style='color:#2E8B57;margin-bottom:5px;margin-top:0;'>{safe_title}</h4>"
                     f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
-                    f"👤 Author: {thread_data['creator']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 {model_name}"
+                    f"👤 Author: {safe_creator} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 {model_n}"
                     f"</div><div style='font-size:14px;line-height:1.6;color:#333;'>{html_summary}</div>"
                     f"<div style='margin-top:20px;border-top:1px solid #eee;padding-top:10px;'><a href='{thread_data['link']}' style='display:inline-block;padding:8px 15px;background:#2E8B57;color:white;text-decoration:none;border-radius:4px;font-weight:bold;'>👉 查看原帖 (Source)</a></div>"
                 )
                 
-                # 发送并验证
                 if self.notifier.send_html_message(push_title, msg_content):
                     self.log_push_history("thread", thread_data['title'], thread_data['link'])
 
@@ -900,32 +814,34 @@ class ForumMonitor:
         try:
             self.comments_collection.insert_one(comment_data)
             log(f"   ✅ [新回复] {comment_data['author']} (活跃中...)", GREEN)
+            
+            if not comment_data['message'].strip(): return
+
             ai_resp = self.get_filter_from_ai(comment_data['message'])
             if "FALSE" not in ai_resp:
                 log(f"      🚀 关键词匹配! 推送中...", GREEN)
-                
-                # Render AI response (e.g. Bolding)
                 ai_resp_html = self.markdown_to_html(ai_resp)
-                
                 time_str = created_at_sh.strftime('%Y-%m-%d %H:%M')
-                model_name = self.config.get('model', 'Unknown')
                 
-                # --- UPDATE: Emoji Title Logic ---
-                thread_provider = thread_data.get('creator', 'Unknown')
-                reply_author = comment_data['author']
+                # --- FIX: ESCAPE STRINGS ---
+                thread_provider = thread_data.get('creator', 'Unknown').replace('<', '&lt;').replace('>', '&gt;')
+                reply_author = comment_data['author'].replace('<', '&lt;').replace('>', '&gt;')
+                safe_thread_title = thread_data['title'].replace('<', '&lt;').replace('>', '&gt;')
+                # ---------------------------
                 
                 if reply_author == thread_provider:
                     push_title = f"🔵 [{thread_provider}] 楼主新回复"
-                    header_color = "#007bff" # Blue for Creator
+                    header_color = "#007bff"
                 else:
-                    # Patron Provider / Other Provider / Top Host reply
                     push_title = f"🔴 [{thread_provider}] ⚡插播({reply_author})"
-                    header_color = "#d63384" # Pink for Third-party Provider
+                    header_color = "#d63384"
+                
+                model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
 
                 msg_content = (
                     f"<h4 style='color:{header_color};margin-bottom:5px;'>💬 {push_title}</h4>"
                     f"<div style='font-size:12px;color:#666;margin-bottom:10px;'>"
-                    f"📌 Source: {thread_data['title']} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 {model_name}"
+                    f"📌 Source: {safe_thread_title} <span style='margin:0 5px;color:#ddd;'>|</span> 🕒 {time_str} (SH) <span style='margin:0 5px;color:#ddd;'>|</span> 🤖 {model_n}"
                     f"</div>"
                     f"<div style='background:#f8f9fa;padding:10px;border:1px solid #eee;border-radius:5px;color:#333;'><b>🤖 AI 分析:</b><br>{ai_resp_html}</div>"
                     f"<div style='margin-top:15px;'><a href='{comment_data['url']}' style='color:{header_color};'>👉 查看回复</a></div>"
@@ -942,11 +858,8 @@ class ForumMonitor:
         soup = BeautifulSoup(html_content, 'html.parser')
         comments = soup.find_all('li', class_='ItemComment')
         now_sh = datetime.now(SHANGHAI)
-        
-        # Load configs
         enabled_roles = self.config.get('monitored_roles', ["creator", "provider", "top_host", "host_rep", "admin"])
         target_usernames = self.config.get('monitored_usernames', [])
-        
         found_recent = False
 
         for comment in comments:
@@ -962,52 +875,33 @@ class ForumMonitor:
                 if not author_tag: continue
                 author_name = author_tag.text
                 
-                # --- Role & User Logic ---
                 role_hits = []
                 is_target_user = (author_name in target_usernames)
+                if author_name == thread_data['creator']: role_hits.append('creator')
                 
-                # 1. Check Creator
-                if author_name == thread_data['creator']:
-                    role_hits.append('creator')
-                
-                # 2. Check CSS Classes / Username for Others
                 comment_classes = comment.get('class', [])
                 class_str = " ".join(comment_classes).lower()
                 
-                if 'role_patronprovider' in class_str or 'role_provider' in class_str:
-                    role_hits.append('provider')
-                if 'role_tophost' in class_str:
-                    role_hits.append('top_host')
-                if 'role_hostrep' in class_str:
-                    role_hits.append('host_rep')
+                if 'role_patronprovider' in class_str or 'role_provider' in class_str: role_hits.append('provider')
+                if 'role_tophost' in class_str: role_hits.append('top_host')
+                if 'role_hostrep' in class_str: role_hits.append('host_rep')
+                if 'role_administrator' in class_str or author_name.lower() == 'administrator': role_hits.append('admin')
+                if not role_hits: role_hits.append('other')
                 
-                # Admin check
-                if 'role_administrator' in class_str or author_name.lower() == 'administrator':
-                    role_hits.append('admin')
-                
-                # 3. If no special roles, it counts as 'other'
-                if not role_hits:
-                    role_hits.append('other')
-                
-                # 4. DECISION: Process if (Role is Enabled) OR (User is in Target List)
                 should_process = False
-                
-                # Check Roles
-                if any(r in enabled_roles for r in role_hits):
-                    should_process = True
-                
-                # Check Specific User (Overrides Role check)
-                if is_target_user:
-                    should_process = True
-                    
-                if not should_process:
-                    continue
-                # -----------------------------------------------
+                if any(r in enabled_roles for r in role_hits): should_process = True
+                if is_target_user: should_process = True
+                if not should_process: continue
 
                 comment_id = comment['id'].replace('Comment_', '')
-                message = comment.find('div', class_='Message').text.strip()
                 
-                # FIX: Use Exact Permalink structure
+                msg_div = comment.find('div', class_='Message')
+                if msg_div:
+                    for quote in msg_div.find_all('blockquote'):
+                        quote.decompose()
+                    message = msg_div.get_text(separator=' ', strip=True)
+                else: message = ""
+                
                 permalink_url = f"https://lowendtalk.com/discussion/comment/{comment_id}/#Comment_{comment_id}"
 
                 c_data = {
@@ -1038,9 +932,7 @@ class ForumMonitor:
              stored = self.threads_collection.find_one({'link': thread_data['link']})
              if stored and 'creator' in stored: thread_data['creator'] = stored['creator']
 
-        # Optimized Timeout to 15s
         REQ_TIMEOUT = 15
-
         try:
             time.sleep(1 if silent else 0.2)
             resp = self.scraper.get(thread_data['link'], timeout=REQ_TIMEOUT)
@@ -1048,14 +940,10 @@ class ForumMonitor:
             
             soup = BeautifulSoup(resp.text, 'html.parser')
             max_page = self.get_max_page_from_soup(soup)
-            
-            # Reverse Scan: Limit to last 3 pages (Max -> Max-2)
             target_limit = max(1, max_page - 2)
             for page in range(max_page, target_limit - 1, -1):
                 page_start = time.time()
-                
-                if page == 1 and max_page == 1:
-                    content = resp.text
+                if page == 1 and max_page == 1: content = resp.text
                 else:
                     time.sleep(0.2)
                     page_url = f"{thread_data['link']}/p{page}"
@@ -1064,33 +952,25 @@ class ForumMonitor:
                     content = p_resp.text
 
                 has_recent = self.parse_let_comment(content, thread_data)
-                
                 page_dur = time.time() - page_start
                 if not silent: 
                     author = thread_data.get('creator', 'Unknown')
                     title = thread_data.get('title', 'Unknown')
                     log(f"   📄 {WHITE}@{author}{NC} {CYAN}{title[:30]}...{NC} | P{page}/{max_page} | {page_dur:.2f}s", GRAY)
-
-                if not has_recent:
-                    break
+                if not has_recent: break
             return True
-
         except Exception as e: return False
 
-    # --- RSS Logic (Multi-Threaded) ---
     def process_rss_item(self, item_str):
         try:
             item_soup = BeautifulSoup(item_str, 'xml')
             title = item_soup.find('title').get_text()
             link = item_soup.find('link').get_text()
-            
             creator = "Unknown"
             c_tag = item_soup.find('dc:creator') or item_soup.find('creator') or item_soup.find('author')
             if c_tag: creator = c_tag.get_text(strip=True)
-
             date_str = item_soup.find('pubDate').get_text()
             pub_date = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %z")
-            
             desc = item_soup.find('description').get_text() if item_soup.find('description') else ""
             desc_text = BeautifulSoup(desc, 'html.parser').get_text(separator=" ", strip=True)
 
@@ -1098,7 +978,6 @@ class ForumMonitor:
                 'cate': 'let', 'title': title, 'link': link, 'description': desc_text,
                 'pub_date': pub_date, 'created_at': datetime.utcnow(), 'creator': creator, 'last_page': 1
             }
-
             self.processed_urls_this_cycle.add(link)
             age = (datetime.now(timezone.utc) - pub_date).total_seconds()
 
@@ -1118,160 +997,97 @@ class ForumMonitor:
     def check_rss(self):
         try:
             start_t = time.time()
-            max_w = self.config.get('max_workers', 5)
-            
+            max_w = self.config.get('max_workers', 3) 
             resp = self.scraper.get("https://lowendtalk.com/categories/offers/feed.rss", timeout=30)
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'xml')
                 items = soup.find_all('item')
                 log(f"RSS 扫描开始 | 目标: {len(items)} | 线程数: {max_w}", BLUE, "📡")
-                
                 stats = {"SILENT": 0, "ACTIVE": 0, "NEW_PUSH": 0, "ERROR": 0, "OLD_SAVED": 0}
                 with ThreadPoolExecutor(max_workers=max_w) as executor:
                     futures = [executor.submit(self.process_rss_item, str(i)) for i in items]
                     for f in as_completed(futures):
                         res = f.result()
                         if res in stats: stats[res] += 1
-                
                 duration = time.time() - start_t
                 log(f"RSS 扫描完成 | 耗时: {duration:.2f}s | 新帖:{stats['NEW_PUSH']} | 活跃:{stats['ACTIVE']} | 静默:{stats['SILENT']}", GREEN)
         except Exception as e: log(f"RSS Error: {e}", RED, "❌")
 
-    # --- VIP Monitor Logic ---
     def check_vip_threads(self):
-        # Read from config instead of hardcoded list
         vip_urls = self.config.get('vip_threads', [])
-        
         if not vip_urls: return
-        
         log(f"VIP 专线扫描开始 ({len(vip_urls)} urls)...", MAGENTA, "👑")
-        
         for url in vip_urls:
             try:
-                # 1. Scrape the thread page first to get metadata
                 resp = self.scraper.get(url, timeout=30)
-                if resp.status_code != 200:
-                    log(f"   ❌ VIP 过盾失败: {url}", RED)
-                    continue
-                
+                if resp.status_code != 200: continue
                 soup = BeautifulSoup(resp.text, 'html.parser')
-                
-                # Extract Title
                 title_tag = soup.select_one('.PageTitle h1')
                 if not title_tag: continue
                 title = title_tag.get_text(strip=True)
-                
-                # Extract Creator
                 creator = "Unknown"
                 author_tag = soup.select_one('.Author .Username')
                 if author_tag: creator = author_tag.get_text(strip=True)
-                
-                # Construct data object
-                t_data = {
-                    'link': url,
-                    'title': title,
-                    'creator': creator,
-                    'pub_date': datetime.now(timezone.utc) # Dummy date to force "Active"
-                }
-                
-                # Upsert to DB to ensure we have the creator info
-                self.threads_collection.update_one(
-                    {'link': url}, 
-                    {'$setOnInsert': t_data}, 
-                    upsert=True
-                )
-                
-                # Force fetch comments
+                t_data = {'link': url, 'title': title, 'creator': creator, 'pub_date': datetime.now(timezone.utc)}
+                self.threads_collection.update_one({'link': url}, {'$setOnInsert': t_data}, upsert=True)
                 self.fetch_comments(t_data, silent=False)
-                
-            except Exception as e:
-                log(f"VIP Scan Error: {e}", RED, "❌")
+            except Exception as e: log(f"VIP Scan Error: {e}", RED, "❌")
 
-    # --- Category Logic (Single-Threaded for Safety) ---
     def check_category_list(self):
-        target_urls = [
-            "https://lowendtalk.com/categories/offers",
-            "https://lowendtalk.com/categories/announcements"
-        ]
-        
+        target_urls = ["https://lowendtalk.com/categories/offers", "https://lowendtalk.com/categories/announcements"]
         log(f"列表页扫描开始 ({len(target_urls)} categories)...", MAGENTA, "🔎")
         start_t = time.time()
-        
         for url in target_urls:
             try:
                 log(f"   -> 正在扫描: {url} ...", GRAY)
                 resp = self.scraper.get(url, timeout=30)
-                if resp.status_code != 200: 
-                    log(f"   ❌ 过盾失败 (Status: {resp.status_code})", RED)
-                    continue
-
+                if resp.status_code != 200: continue
                 soup = BeautifulSoup(resp.text, 'html.parser')
-                
                 discussions = soup.select('.ItemDiscussion')
                 if not discussions: discussions = soup.find_all('li', class_='Discussion')
                 if not discussions: discussions = soup.select('tr.ItemDiscussion')
-                
                 candidates = []
-                skipped_rss = 0
-                skipped_time = 0
-                
                 for d in discussions:
                     try:
                         a_tag = d.select_one('.DiscussionName a') or d.find('h3', class_='DiscussionName').find('a')
                         if not a_tag: continue
-                        
                         link = a_tag['href']
                         if not link.startswith('http'): link = "https://lowendtalk.com" + link
                         title = a_tag.get_text(strip=True)
-                        
-                        if link in self.processed_urls_this_cycle: 
-                            skipped_rss += 1
-                            continue
-                        
+                        if link in self.processed_urls_this_cycle: continue
                         last_date_tag = d.find('span', class_='LastCommentDate')
                         if not last_date_tag: last_date_tag = d.select_one('.DateUpdated')
-
                         if last_date_tag:
                             time_tag = last_date_tag.find('time')
                             if time_tag and time_tag.has_attr('datetime'):
                                 dt_str = time_tag['datetime']
                                 last_active = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S%z")
-                                
                                 now = datetime.now(timezone.utc)
                                 if (now - last_active).total_seconds() < 86400 * 2: 
                                     creator = "Unknown"
                                     first_user = d.find('span', class_='FirstUser') or d.select_one('.Author a')
                                     if first_user: creator = first_user.get_text(strip=True)
                                     candidates.append({'link': link, 'title': title, 'creator': creator, 'last_page': 1})
-                                else: skipped_time += 1
                     except: continue
-
-                log(f"      ⚡ 命中候选: {len(candidates)} 个 (RSS跳过:{skipped_rss}/过期:{skipped_time})", GRAY)
-
+                log(f"      ⚡ 命中候选: {len(candidates)} 个", GRAY)
                 if candidates:
                     log(f"      ⚠️ 启动深度抓取 (单线程)...", YELLOW)
-                    for t in candidates:
-                        self.fetch_comments(t, silent=False)
-            
-            except Exception as e:
-                log(f"Category Scan Error ({url}): {e}", RED, "❌")
-                
+                    for t in candidates: self.fetch_comments(t, silent=False)
+            except Exception as e: log(f"Category Scan Error ({url}): {e}", RED, "❌")
         duration = time.time() - start_t
         log(f"列表页扫描完成 | 总耗时: {duration:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (AI Repush v6) ===", GREEN, "🚀")
-        
-        freq = self.config.get('frequency', 600)
+        log("=== 监控服务启动 (v34: Menu Reordered) ===", GREEN, "🚀")
+        freq = self.config.get('frequency', 300)
         while True:
             cycle_start = time.time()
             self.processed_urls_this_cycle.clear()
             print(f"{GRAY}--------------------------------------------------{NC}")
             self.check_rss()
-            self.check_vip_threads() # New VIP Check
+            self.check_vip_threads()
             self.check_category_list()
             self.update_heartbeat()
-            
             cycle_end = time.time()
             total_time = cycle_end - cycle_start
             log(f"⏱️ 本轮扫描总耗时: {total_time:.2f}s | 休眠 {freq}秒...", YELLOW)
@@ -1350,119 +1166,55 @@ class NotificationSender:
         return self.send_html_message("ForumMonitor Notification", message)
 
     def send_telegram(self, title, html_content):
-        if not self.tg_bot_token or not self.tg_chat_id:
-            return False
-
+        if not self.tg_bot_token or not self.tg_chat_id: return False
         try:
-            # Telegram HTML Clean-up Adapter
-            # 1. Combine Title (Bold) + Content
             msg = f"<b>{title}</b>\n\n{html_content}"
-            
-            # 2. Convert standard HTML tags to Telegram supported subset
-            # Replace <br> with newline
             msg = msg.replace("<br>", "\n").replace("<br/>", "\n")
-            
-            # Replace <h4> with Bold + Newline (Used for titles in core.py)
             msg = re.sub(r'<h4.*?>(.*?)</h4>', r'<b>\1</b>\n', msg, flags=re.DOTALL)
-            
-            # Remove div and span tags but keep content (TG doesn't support them)
-            msg = re.sub(r'<div.*?>', '', msg)
-            msg = msg.replace('</div>', '\n')
-            msg = re.sub(r'<span.*?>', '', msg)
-            msg = msg.replace('</span>', ' ')
-            
-            # Clean up excessive newlines
-            while "\n\n\n" in msg:
-                msg = msg.replace("\n\n\n", "\n\n")
+            msg = re.sub(r'<div.*?>', '', msg).replace('</div>', '\n')
+            msg = re.sub(r'<span.*?>', '', msg).replace('</span>', ' ')
+            while "\n\n\n" in msg: msg = msg.replace("\n\n\n", "\n\n")
 
-            # --- SPLIT LOGIC START (Fix for error 400) ---
             messages = []
-            MAX_LEN = 4000 # Safe limit under 4096 to allow markup overhead
-
+            MAX_LEN = 4000
             if len(msg) > MAX_LEN:
                 while len(msg) > 0:
-                    if len(msg) <= MAX_LEN:
-                        messages.append(msg)
-                        break
-                    
-                    # Try to split at the nearest newline before the limit
+                    if len(msg) <= MAX_LEN: messages.append(msg); break
                     split_idx = msg.rfind('\n', 0, MAX_LEN)
-                    
-                    if split_idx == -1: 
-                        # No newline found? Force split at limit
-                        split_idx = MAX_LEN
-                    
+                    if split_idx == -1: split_idx = MAX_LEN
                     messages.append(msg[:split_idx])
                     msg = msg[split_idx:]
-            else:
-                messages.append(msg)
-            # --- SPLIT LOGIC END ---
+            else: messages.append(msg)
 
             all_success = True
             for i, part in enumerate(messages):
-                # Add indicator for continuation
-                if len(messages) > 1:
-                    header = f"[Part {i+1}/{len(messages)}]\n" if i > 0 else ""
-                    part_to_send = header + part
-                else:
-                    part_to_send = part
-
+                header = f"[Part {i+1}/{len(messages)}]\n" if len(messages) > 1 and i > 0 else ""
                 url = f"https://api.telegram.org/bot{self.tg_bot_token}/sendMessage"
-                payload = {
-                    'chat_id': self.tg_chat_id,
-                    'text': part_to_send,
-                    'parse_mode': 'HTML',
-                    'disable_web_page_preview': True
-                }
-                
+                payload = {'chat_id': self.tg_chat_id, 'text': header + part, 'parse_mode': 'HTML', 'disable_web_page_preview': True}
                 resp = self.session.post(url, json=payload, timeout=15)
-                if resp.status_code == 200:
-                    log(f"Telegram Sent: {title[:30]}... (Part {i+1})", GREEN, "✈️")
-                else:
-                    log(f"Telegram Fail: {resp.text}", RED, "❌")
-                    all_success = False
-            
+                if resp.status_code == 200: log(f"Telegram Sent: {title[:30]}... (Part {i+1})", GREEN, "✈️")
+                else: log(f"Telegram Fail: {resp.text}", RED, "❌"); all_success = False
             return all_success
-
-        except Exception as e:
-            log(f"Telegram Error: {e}", RED, "❌")
-            return False
+        except Exception as e: log(f"Telegram Error: {e}", RED, "❌"); return False
 
     def send_html_message(self, title, html_content):
         success_count = 0
-        
-        # 1. Pushplus Send
         if self.pushplus_token and self.pushplus_token != "YOUR_PUSHPLUS_TOKEN_HERE":
             try:
-                # Truncate title for Pushplus limit
                 pp_title = title[:92] + "..." if len(title) > 95 else title
-                payload = {
-                    "token": self.pushplus_token,
-                    "title": pp_title,
-                    "content": html_content,
-                    "template": "html"
-                }
+                payload = {"token": self.pushplus_token, "title": pp_title, "content": html_content, "template": "html"}
                 resp = self.session.post("https://www.pushplus.plus/send", json=payload, timeout=15)
                 if resp.status_code == 200 and resp.json().get('code') == 200:
-                    log(f"Pushplus Sent: {title[:30]}...", GREEN, "📨")
-                    success_count += 1
-                else:
-                    log(f"Pushplus Fail: {resp.text}", RED, "❌")
-            except Exception as e:
-                log(f"Pushplus Error: {e}", RED, "❌")
+                    log(f"Pushplus Sent: {title[:30]}...", GREEN, "📨"); success_count += 1
+                else: 
+                    if "用户账号使用受限" in resp.text:
+                         log(f"Pushplus Quota Limit (Ignored)", YELLOW, "⚠️")
+                    else:
+                         log(f"Pushplus Fail: {resp.text}", RED, "❌")
+            except Exception as e: log(f"Pushplus Error: {e}", RED, "❌")
 
-        # 2. Telegram Send
-        if self.send_telegram(title, html_content):
-            success_count += 1
-
-        # Record success if at least one method worked
-        if success_count > 0:
-            self.record_success()
-            return True
-            
-        if not self.pushplus_token and not self.tg_bot_token:
-             log(f"Virtual Push (No Token configured)", RED, "⚠️")
-             
+        if self.send_telegram(title, html_content): success_count += 1
+        if success_count > 0: self.record_success(); return True
         return False
 EOF
 }
@@ -1480,7 +1232,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (Enhanced Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v34 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
@@ -1528,11 +1280,11 @@ run_install() {
         read -p "Telegram Bot Token: " TG_TOK
         read -p "Telegram Chat ID: " TG_ID
         read -p "请输入 Gemini API Key: " GK
-        # UPDATE: 新安装时使用新的 Prompt
+        # UPDATE: 新安装时使用新的 Prompt 和默认参数
         local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
         jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
-           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.5-flash-lite", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 600, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: []}}' > "$CONFIG_FILE"
+           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: "内容：XXX", frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: []}}' > "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
     else
         run_update_config_prompt
@@ -1584,29 +1336,32 @@ show_menu() {
     echo -e "${CYAN} [基础管理]${NC}"
     printf "  %-4s %-12s %b%s%b\n" "1." "install" "$GRAY" "安装/重置" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "2." "uninstall" "$GRAY" "彻底卸载" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "3." "update" "$GRAY" "更新脚本" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "3." "update" "$GRAY" "更新代码(应用补丁)" "$NC"
     
     echo -e "${CYAN} [服务控制]${NC}"
     printf "  %-4s %-12s %b%s%b\n" "4." "start" "$GRAY" "启动服务" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "5." "stop" "$GRAY" "停止服务" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "6." "restart" "$GRAY" "重启服务" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "7." "keepalive" "$GRAY" "开启保活" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "7." "status" "$GRAY" "详细状态" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "8." "logs" "$GRAY" "实时日志" "$NC"
 
-    echo -e "${CYAN} [配置与监控]${NC}"
-    printf "  %-4s %-12s %b%s%b\n" "8." "edit" "$GRAY" "修改密钥/模型" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "9." "frequency" "$GRAY" "调整频率" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "10." "threads" "$GRAY" "修改线程数" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "11." "vip" "$GRAY" "管理VIP专线" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "12." "roles" "$GRAY" "管理监控角色" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "13." "status" "$GRAY" "详细状态" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "14." "logs" "$GRAY" "实时日志" "$NC"
+    echo -e "${CYAN} [配置管理]${NC}"
+    printf "  %-4s %-12s %b%s%b\n" "9." "edit" "$GRAY" "修改推送/基础配置" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "10." "ai-switch" "$GRAY" "切换 AI 引擎(Gemini/Workers)" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "11." "frequency" "$GRAY" "调整频率" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "12." "threads" "$GRAY" "修改线程数" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "13." "keepalive" "$GRAY" "开启保活" "$NC"
+
+    echo -e "${CYAN} [监控规则]${NC}"
+    printf "  %-4s %-12s %b%s%b\n" "14." "vip" "$GRAY" "管理VIP专线" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "15." "roles" "$GRAY" "管理监控角色" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "16." "users" "$GRAY" "管理指定用户" "$NC"
 
     echo -e "${CYAN} [功能测试]${NC}"
-    printf "  %-4s %-12s %b%s%b\n" "15." "test-ai" "$GRAY" "测试 AI 连通性" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "16." "test-push" "$GRAY" "测试消息推送" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "17." "history" "$GRAY" "查看推送历史" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "18." "repush" "$GRAY" "手动推送活跃帖" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "19." "users" "$GRAY" "管理指定用户" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "17." "test-ai" "$GRAY" "测试 AI 连通性" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "18." "test-push" "$GRAY" "测试消息推送" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "19." "history" "$GRAY" "查看推送历史" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "20." "repush" "$GRAY" "手动推送活跃帖" "$NC"
 
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
     echo -e "  q. quit         退出"
@@ -1623,20 +1378,21 @@ main() {
             start|4) run_start ;;
             stop|5) run_stop ;;
             restart|6) run_restart ;;
-            keepalive|7) run_setup_keepalive ;;
-            edit|8) run_edit_config ;;
-            frequency|9) run_edit_frequency ;;
-            threads|10) run_edit_threads ;;
-            vip|11) run_manage_vip ;;
-            roles|12) run_manage_roles ;;
-            status|13) run_status ;;
-            logs|14) run_logs ;;
-            test-ai|15) run_test_ai ;;
-            test-push|16) run_test_push ;;
-            history|17) run_view_history; read -n 1 -s -r -p "完成..." ;;
-            repush|18) run_repush_active; read -n 1 -s -r -p "完成..." ;;
-            users|19) run_manage_users ;;
-            update|3) run_update ;; 
+            status|7) run_status ;;
+            logs|8) run_logs ;;
+            edit|9) run_edit_config ;;
+            ai-switch|10) run_ai_switch ;;
+            frequency|11) run_edit_frequency ;;
+            threads|12) run_edit_threads ;;
+            keepalive|13) run_setup_keepalive ;;
+            vip|14) run_manage_vip ;;
+            roles|15) run_manage_roles ;;
+            users|16) run_manage_users ;;
+            test-ai|17) run_test_ai ;;
+            test-push|18) run_test_push ;;
+            history|19) run_view_history; read -n 1 -s -r -p "完成..." ;;
+            repush|20) run_repush_active; read -n 1 -s -r -p "完成..." ;;
+            update|3) run_apply_app_update; read -n 1 -s -r -p "完成..." ;; 
             monitor) run_monitor_logic ;;
             *) show_menu; exit 1 ;;
         esac; exit 0
@@ -1649,23 +1405,24 @@ main() {
         case "$CMD" in
             1) run_install; read -n 1 -s -r -p "完成..." ;;
             2) run_uninstall; exit 0 ;;
-            3) run_update ;;
+            3) run_apply_app_update; read -n 1 -s -r -p "完成..." ;;
             4) run_start; read -n 1 -s -r -p "完成..." ;;
             5) run_stop; read -n 1 -s -r -p "完成..." ;;
             6) run_restart; read -n 1 -s -r -p "完成..." ;;
-            7) run_setup_keepalive; read -n 1 -s -r -p "完成..." ;;
-            8) run_edit_config; read -n 1 -s -r -p "完成..." ;;
-            9) run_edit_frequency; read -n 1 -s -r -p "完成..." ;;
-            10) run_edit_threads; read -n 1 -s -r -p "完成..." ;;
-            11) run_manage_vip ;;
-            12) run_manage_roles ;;
-            13) run_status; read -n 1 -s -r -p "完成..." ;;
-            14) run_logs; read -n 1 -s -r -p "完成..." ;;
-            15) run_test_ai; read -n 1 -s -r -p "完成..." ;;
-            16) run_test_push; read -n 1 -s -r -p "完成..." ;;
-            17) run_view_history; read -n 1 -s -r -p "按任意键返回..." ;;
-            18) run_repush_active; read -n 1 -s -r -p "按任意键返回..." ;;
-            19) run_manage_users ;;
+            7) run_status; read -n 1 -s -r -p "完成..." ;;
+            8) run_logs; read -n 1 -s -r -p "完成..." ;;
+            9) run_edit_config; read -n 1 -s -r -p "完成..." ;;
+            10) run_ai_switch ;;
+            11) run_edit_frequency; read -n 1 -s -r -p "完成..." ;;
+            12) run_edit_threads; read -n 1 -s -r -p "完成..." ;;
+            13) run_setup_keepalive; read -n 1 -s -r -p "完成..." ;;
+            14) run_manage_vip ;;
+            15) run_manage_roles ;;
+            16) run_manage_users ;;
+            17) run_test_ai; read -n 1 -s -r -p "完成..." ;;
+            18) run_test_push; read -n 1 -s -r -p "完成..." ;;
+            19) run_view_history; read -n 1 -s -r -p "按任意键返回..." ;;
+            20) run_repush_active; read -n 1 -s -r -p "按任意键返回..." ;;
             q|Q) break ;;
             *) ;;
         esac
