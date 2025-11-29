@@ -1,142 +1,156 @@
 
 
------
 
-# 🚀 ForumMonitor - LowEndTalk AI 智能监控 (Gemini Edition)
+# 📢 ForumMonitor - Intelligent LowEndTalk Deal Hunter
 
-> **基于 Google Gemini AI 的 VPS 论坛高信噪比监控系统**
->
-> *AI 意图识别 | 自动翻译 | 补货直达 | 福利/抽奖捕捉 | 双通道推送*
+**ForumMonitor** 是一个专为 LowEndTalk (LET) 论坛设计的自动化监控工具。它结合了 **RSS 轮询**与**页面爬取**技术，利用先进的 **AI 模型 (Google Gemini / Cloudflare Workers AI)** 对帖子内容进行智能摘要，并对回复进行语义过滤，只推送真正有价值的优惠信息。
 
-**ForumMonitor** 是一个高度定制化的 LowEndTalk 论坛监控脚本。与传统的关键词监控不同，它引入了 **Google Gemini AI** 进行语义分析，不仅能识别商家的“补货”、“降价”意图，还能精准捕捉 **“赠送余额”、“抽奖 (Giveaway/Raffle)”** 等福利信息，并自动过滤掉无关的水贴。
+> **核心优势**：拒绝关键词机械匹配，使用 LLM 理解上下文，精准捕捉补货、闪购和赠品信息，过滤灌水回复。
 
 -----
 
-## ✨ 核心特性 (Key Features)
+## ✨ 功能特性
 
-  * **🧠 AI 驱动分析**: 使用 **Google Gemini 2.5 Flash Lite** 模型，将英文内容自动翻译为中文摘要，并提取关键信息（套餐/价格/优惠码/截止时间）。
-  * **🎁 全方位监控**:
-      * **销售 (Sales)**: 补货、闪购、降价、新套餐。
-      * **福利 (Perks)**: 抽奖 (Raffle)、赠送 (Giveaway)、免费试用、送余额。
-  * **👥 精细化角色过滤**:
-      * 支持监控：**楼主 (Creator)**、**认证商家 (Provider)**、**Top Host**、**Host Rep**、**管理员 (Admin)**。
-      * **指定用户监控**: 支持添加特定的大佬/红人 ID (Target Users)，无论其是否有商家身份，均强制监控。
-  * **📢 双通道推送**:
-      * **Telegram**: 支持长消息自动分段 (Auto-Chunking)，完美修复长文发送失败问题；支持 HTML 渲染。
-      * **Pushplus**: 微信/企业微信通道支持。
-  * **🎨 视觉增强**: 推送标题带 Emoji 区分：
-      * 🟢 **[新帖]**：新发布的促销/活动。
-      * 🔵 **[楼主]**：楼主本人的回复。
-      * 🔴 **[插播]**：其他商家或指定大佬的回复。
-  * **🛡️ 智能防风控**: 集成 `CloudScraper`，模拟真实浏览器指纹，有效绕过 Cloudflare 5秒盾。
-  * **📉 智能局部扫描**: 针对几百页的“传家宝”神帖，仅智能回溯扫描 **最后 3 页**，既防漏抓又低负载。
-  * **⚡ 精准直达**: 推送链接采用 `comment/{id}/#Comment_{id}` 锚点格式，点击通知直接跳转到具体楼层。
-
------
-
-## 🛠️ 运行逻辑
-
-脚本采用 **Bash 管理 + Python 核心** 的架构，运行逻辑如下：
-
-1.  **全域发现**:
-      * **RSS 快速扫描** (多线程): 秒级发现新发布的帖子。
-      * **双板块兜底** (单线程): 轮询 `Offers` 和 `Announcements` 板块，防止 RSS 漏抓。
-      * **VIP 专线**: 强制监控指定的“万楼大厦” (Megathread)，无视发布时间限制。
-2.  **新帖处理**:
-      * Gemini AI 翻译全文 → 提取高性价比套餐 → 生成中文摘要 → 🟢 推送。
-3.  **回复/补货监控**:
-      * 锁定活跃帖子 → 计算最大页码 → 倒序扫描最后 3 页。
-      * **身份校验**: 是商家? 是管理? 是指定的大佬?
-      * **AI 裁判**: 内容是“卖货”还是“送福利”？(是 → 🔵/🔴 推送; 否 → 忽略)。
+  * **🧠 双 AI 引擎支持**：
+      * **Google Gemini**：支持 Gemini 2.0 Flash Lite 等模型（推荐，速度快）。
+      * **Cloudflare Workers AI**：支持 Llama-3.1-8b 等开源模型。
+  * **🚀 智能摘要与过滤**：
+      * **新帖摘要**：自动提取 VPS 配置、价格、机房位置、优惠码，生成卡片式报告。
+      * **回复筛选**：AI 自动识别回复内容，过滤 "Nice offer"、"Thanks" 等无意义灌水，仅推送补货、降价、抽奖等高价值回复。
+  * **📱 多通道推送**：
+      * **Telegram**：支持 HTML 格式渲染，排版美观，支持一键直达评论楼层。
+      * **Pushplus**：微信推送支持。
+      * **独立开关**：可随时在菜单中独立开启或关闭任意推送通道。
+  * **🛡️ 极高稳定性 (v50+)**：
+      * **单例锁机制**：防止脚本重复运行导致的消息重复。
+      * **自愈功能**：启动时自动清理僵尸进程，防止日志乱飘和资源占用。
+      * **Watchdog**：内置心跳检测，服务假死自动重启。
+  * **⚙️ 强大的管理菜单**：
+      * 全交互式 Bash 菜单，支持一键安装、配置修改、日志查看、手动重推等。
+      * 支持 **VIP 专线监控**（强制高频扫描特定帖子）。
+      * 支持 **指定用户监控**（例如监控特定商家的发言）。
 
 -----
 
-## 📥 安装与部署
+## 🛠️ 安装指南
 
-### 前置要求
+### 环境要求
 
-  * 一台 Linux VPS (推荐 Debian 11/12 或 Ubuntu 20.04+)。
-  * **Google Gemini API Key** ([获取地址](https://aistudio.google.com/app/apikey))。
-  * **Telegram Bot Token & Chat ID** (可选，推荐)。
-  * **Pushplus Token** (可选)。
+  * **OS**: Debian 10+ / Ubuntu 20.04+ (推荐 Debian 12)
+  * **Root** 权限
+  * **依赖**: Python 3, MongoDB (脚本会自动安装)
 
-### 一键安装
+### 快速部署
+
+下载脚本并添加执行权限（假设脚本名为 `ForumMonitor.sh`）：
 
 ```bash
-# 下载脚本
+# 1. 下载脚本 (请替换为你的实际下载方式)
 wget -O ForumMonitor.sh https://raw.githubusercontent.com/ypkin/RSS-ForumMonitor-LET/refs/heads/ForumMonitor-with-gemini/ForumMonitor.sh
 
-# 添加执行权限
+
+# 2. 赋予执行权限
 chmod +x ForumMonitor.sh
 
-# 运行安装向导
+# 3. 运行安装向导
 ./ForumMonitor.sh
 ```
 
-进入菜单后，选择 `1. install`，根据提示输入 API Key 即可完成部署。
+首次运行选择 `1. install`，脚本将自动：
+
+1.  更新系统并安装 Python3, venv, pip, jq, curl 等依赖。
+2.  安装并启动 MongoDB。
+3.  创建 Python 虚拟环境并安装所需库。
+4.  引导你输入 API Token (Pushplus, Telegram, Gemini/Cloudflare)。
+5.  配置 Systemd 服务并设置开机自启。
 
 -----
 
-## 🖥️ 命令菜单
+## ⚙️ 配置说明
 
-安装完成后，直接输入 `fm` 或 `./ForumMonitor.sh` 即可唤出管理菜单：
+配置文件位于 `/opt/forum-monitor/data/config.json`。你可以通过菜单 `9. edit` 修改，也可以手动编辑。
 
-| 选项 | 命令 | 描述 |
-| :--- | :--- | :--- |
-| **1** | `install` | 安装依赖、MongoDB 并初始化配置 |
-| **3** | `update` | 在线更新脚本到最新版本 |
-| **6** | `restart` | 重启后台服务 |
-| **8** | `edit` | 修改 API Key、Token 或 AI 模型 |
-| **9** | `frequency` | 修改轮询间隔 (默认 600秒) |
-| **11** | `vip` | **VIP 专线管理** (强制监控特定神帖) |
-| **12** | `roles` | **角色管理** (开关 Provider/Admin/Other 等监控) |
-| **14** | `logs` | 查看实时运行日志 |
-| **15** | `test-ai` | 测试 Gemini API 连通性 |
-| **16** | `test-push`| 发送测试消息到所有通道 |
-| **19** | `users` | **指定用户管理** (添加特定的大佬 ID) |
+| 字段 | 说明 |
+| :--- | :--- |
+| `pushplus_token` | Pushplus 的 Token (留空不启用) |
+| `telegram_bot_token` | Telegram Bot Token (BotFather 获取) |
+| `telegram_chat_id` | 接收消息的 Chat ID (个人或频道 ID) |
+| `gemini_api_key` | Google AI Studio 申请的 API Key |
+| `ai_provider` | AI 提供商：`"gemini"` 或 `"workers"` |
+| `frequency` | 轮询间隔（秒），建议 `>= 300`，太快可能触发 Cloudflare 盾 |
+| `vip_threads` | 字符串数组，包含需要强制每轮扫描的帖子 URL |
+| `monitored_roles` | 监控的角色列表，如 `["creator", "provider", "admin"]` |
 
 -----
 
-## 🔔 推送示例
+## 🖥️ 菜单功能详解
 
-### 1\. 新帖推送
+运行 `./ForumMonitor.sh` 即可唤出管理菜单：
 
-> **🟢 [新帖] HostUS Black Friday Special**
->
->   * **AI 甄选**: 1GB Ryzen KVM ($15/Year) - 性价比极高。
->   * **VPS 列表**: ...
->   * **优缺点分析**: ...
+### [基础管理]
 
-### 2\. 商家补货
+  * **1. install**: 完整安装或重置环境。
+  * **2. uninstall**: 停止服务并删除所有文件。
+  * **3. update**: 热更新脚本代码（保留配置）。
 
-> **🔵 [HostUS] 楼主新回复**
->
->   * **🎁 内容**: 1GB 传家宝套餐已补货 50 台。
->   * **🏷️ 代码**: `BF2025`
->   * **🔗 链接**: [👉 查看回复 (直达楼层)]
+### [服务控制]
 
-### 3\. 福利/抽奖
+  * **4-7. start/stop/restart/status**: Systemd 服务控制。
+  * **8. logs**: 查看实时日志。**特色功能**：支持按任意键安全退出，自动清理后台日志进程，防止终端刷屏。
 
-> **🔴 [RackNerd] ⚡插播(dustinc)**
->
->   * **🎁 内容**: 评论本帖抽取 3 位用户赠送 $50 余额。
->   * **🏷️ 规则**: 包含 "I love RN" 即可参与。
->   * **📝 备注**: 24小时后开奖。
->   * **🔗 链接**: [👉 查看回复 (直达楼层)]
+### [配置管理]
+
+  * **9. edit**: 修改 Token 和 ID。
+  * **10. ai-switch**: 在 Gemini 和 Cloudflare Workers AI 之间一键切换。
+  * **11-12. frequency/threads**: 调整轮询频率和并发线程数。
+  * **13. keepalive**: 添加 Crontab 任务，每5分钟检测一次服务状态。
+  * **14. toggle-push**: **[v42+]** 实时开启/关闭 Pushplus 或 Telegram 推送，无需修改 Token。
+
+### [监控规则]
+
+  * **14-16**: 管理 VIP 专线链接、监控的角色（如楼主、商家）、以及指定监控的用户名。
+
+### [功能测试]
+
+  * **17. test-ai**: 测试 AI API 是否连通并能正常回复。
+  * **18. test-push**: 发送一条**全真模拟**的优惠通知，包含完整排版，用于测试显示效果。
+  * **20. repush**: 强制重新分析并推送数据库中最近 5 个活跃帖子（绕过去重逻辑）。
 
 -----
 
-## 📂 文件结构
+## 🤖 AI 提示词 (System Prompts)
 
-  * `/opt/forum-monitor/` - 程序主目录
-      * `core.py` - Python 核心逻辑 (爬虫/AI/数据库)
-      * `send.py` - 消息推送模块 (支持 TG 分段)
-      * `data/config.json` - 用户配置文件
-      * `data/stats.json` - 统计数据
-      * `venv/` - Python 虚拟环境
+项目内置了两套精心调优的 Prompt（提示词），分别用于：
+
+1.  **Thread Analysis (新帖分析)**：
+
+      * 要求 AI 提取机房、配置、价格。
+      * 要求 AI 翻译为中文。
+      * 要求 AI 判断优缺点和适用人群。
+
+2.  **Comment Filtering (回复过滤)**：
+
+      * 要求 AI 扮演“福利分析师”。
+      * 只有当回复包含 **补货、降价、优惠码、赠送** 等实质内容时才提取。
+      * 纯表情、"Thank you"、"Nice" 等内容会被 AI 标记为 `FALSE` 并直接丢弃。
+
+-----
+
+## 📝 更新日志
+
+  * **v53/54 (Current)**:
+      * 修复了日志查看器退出时的崩溃问题。
+      * 优化了 Telegram 消息排版，增加了 `[新帖]` / `[Repush]` / `[TEST]` 等醒目标题前缀。
+      * 增强了 `repush` 功能，允许强制推送已存在的帖子。
+  * **v50-52**:
+      * 引入 **单例锁 (Singleton Lock)** 和 **自愈机制 (Self-Healing)**，彻底解决了后台双重进程导致的日志重复和资源浪费问题。
+  * **v40-49**:
+      * 增加了推送通道独立开关。
+      * 恢复了彩色的日志输出，优化了视觉体验。
 
 -----
 
 ## ⚠️ 免责声明
 
-本脚本仅供学习交流使用。请勿将扫描频率设置过高（建议不低于 60秒），以免对目标网站造成压力。使用本脚本产生的任何后果由使用者自行承担。
+本工具仅供学习和技术研究使用。请勿将轮询频率设置过高，以免对目标网站造成压力或导致 IP 被封禁。开发者不对使用本工具产生的任何后果负责。
+
