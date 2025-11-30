@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v55: Verbose Scan Logs) ---
-# Version: 2025.11.29.55
+# --- ForumMonitor 管理脚本 (v55.1: Channel Support) ---
+# Version: 2025.11.30.55.1
 # Changes:
+# [x] Update: Updated prompts to clarify Telegram Channel ID format (-100 prefix).
 # [x] Feature: Added explicit Object/Shield-Status/Result logs for page scanning.
 # [x] Config: Max threads limit set to 100.
 # [x] Fix: Log viewer exit behavior (0 to menu, Ctrl+C to shell).
@@ -127,7 +128,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v55: Verbose Logs)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v55.1: Channel Support)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -400,7 +401,8 @@ run_edit_config() {
 
     read -p "Pushplus Token: " N_PT
     read -p "Telegram Bot Token: " N_TG_TOK
-    read -p "Telegram Chat ID: " N_TG_ID
+    # UPDATED PROMPT FOR CHANNEL ID
+    read -p "Telegram Chat/Channel ID (频道需带 -100 前缀): " N_TG_ID
     
     [ -z "$N_PT" ] && N_PT="$C_PT"
     [ -z "$N_TG_TOK" ] && N_TG_TOK="$C_TG_TOK"
@@ -1154,7 +1156,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v55) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v55.1) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1318,7 +1320,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v55 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v55.1 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
@@ -1363,7 +1365,8 @@ run_install() {
     if [ ! -f "$CONFIG_FILE" ]; then
         read -p "Pushplus Token: " PT
         read -p "Telegram Bot Token: " TG_TOK
-        read -p "Telegram Chat ID: " TG_ID
+        # UPDATED PROMPT FOR CHANNEL ID
+        read -p "Telegram Chat/Channel ID (频道需带 -100 前缀): " TG_ID
         read -p "Gemini API Key: " GK
         local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
