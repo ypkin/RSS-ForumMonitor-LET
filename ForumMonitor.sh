@@ -1,12 +1,11 @@
-# 1. 写入修复后的脚本文件 (v55.5)
-
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v55.5: Fix Unbound Variable) ---
-# Version: 2025.11.30.55.5
+# --- ForumMonitor 管理脚本 (v55: Verbose Scan Logs) ---
+# Version: 2025.11.29.55
 # Changes:
-# [x] Fix: Restored missing 'read' prompts in run_install to prevent "PT: unbound variable" error.
-# [x] Logic: Separated "First-time Setup" vs "Config Update" logic strictly.
+# [x] Feature: Added explicit Object/Shield-Status/Result logs for page scanning.
+# [x] Config: Max threads limit set to 100.
+# [x] Fix: Log viewer exit behavior (0 to menu, Ctrl+C to shell).
 #
 # --- (c) 2025 ---
 
@@ -57,7 +56,7 @@ check_service_exists() {
 check_jq() {
     if ! command -v jq &> /dev/null; then
         msg_info "正在安装 jq..."
-        apt-get update && apt-get install -y jq
+        apt-get update -qq && apt-get install -y -qq jq
     fi
 }
 
@@ -105,6 +104,7 @@ show_dashboard() {
     local CUR_MODEL="Unknown"
     local CUR_FREQ="300"
     
+    # Push Status
     local S_PP="ON"
     local S_TG="ON"
     local C_PP="GREEN"
@@ -127,7 +127,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v55.5: Fix Unbound)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v55: Verbose Logs)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -227,6 +227,7 @@ run_toggle_push() {
 run_manage_vip() {
     check_service_exists
     check_jq
+    
     while true; do
         echo -e "\n${CYAN}--- VIP 专线监控管理 ---${NC}"
         local VIPS=$(jq -r '.config.vip_threads[]' "$CONFIG_FILE" 2>/dev/null || echo "")
@@ -234,9 +235,14 @@ run_manage_vip() {
         if [ -n "$VIPS" ]; then
             echo -e "\n当前监控列表:"
             IFS=$'\n'
-            for url in $VIPS; do echo -e "  [${GREEN}$COUNT${NC}] $url"; COUNT=$((COUNT+1)); done
+            for url in $VIPS; do
+                echo -e "  [${GREEN}$COUNT${NC}] $url"
+                COUNT=$((COUNT+1))
+            done
             unset IFS
-        else echo -e "\n(列表为空)"; fi
+        else
+            echo -e "\n(列表为空)"
+        fi
         echo -e "\n${YELLOW}操作选项:${NC} 1.添加 2.删除 0.返回"
         read -p "请选择: " OPT
         case "$OPT" in
@@ -246,13 +252,15 @@ run_manage_vip() {
                     jq 'if .config.vip_threads == null then .config.vip_threads = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
                     jq --arg url "$NEW_URL" '.config.vip_threads += [$url]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
                     msg_ok "添加成功"
-                fi ;;
+                fi
+                ;;
             2)
                 read -p "序号: " DEL_IDX
                 if [[ "$DEL_IDX" =~ ^[0-9]+$ ]] && [ "$DEL_IDX" -lt "$COUNT" ]; then
                     jq "del(.config.vip_threads[$DEL_IDX])" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
                     msg_ok "删除成功"
-                fi ;;
+                fi
+                ;;
             0) return ;;
         esac
     done
@@ -280,13 +288,15 @@ run_manage_users() {
                     jq 'if .config.monitored_usernames == null then .config.monitored_usernames = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
                     jq --arg u "$NEW_USER" '.config.monitored_usernames += [$u]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
                     msg_ok "添加成功"
-                fi ;;
+                fi
+                ;;
             2)
                 read -p "序号: " DEL_IDX
                 if [[ "$DEL_IDX" =~ ^[0-9]+$ ]] && [ "$DEL_IDX" -lt "$COUNT" ]; then
                     jq "del(.config.monitored_usernames[$DEL_IDX])" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
                     msg_ok "删除成功"
-                fi ;;
+                fi
+                ;;
             0) return ;;
         esac
     done
@@ -296,9 +306,11 @@ run_manage_roles() {
     check_service_exists
     check_jq
     jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","admin"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
     while true; do
         echo -e "\n${CYAN}--- 监控角色设置 ---${NC}"
         has_role() { jq -e --arg r "$1" '.config.monitored_roles | index($r)' "$CONFIG_FILE" >/dev/null; }
+        
         echo -e "\n当前状态:"
         if has_role "creator"; then S="✅"; else S="❌"; fi; echo -e "  1. $S 楼主 (Creator)"
         if has_role "provider"; then S="✅"; else S="❌"; fi; echo -e "  2. $S 认证商家 (Provider)"
@@ -306,6 +318,7 @@ run_manage_roles() {
         if has_role "host_rep"; then S="✅"; else S="❌"; fi; echo -e "  4. $S Host Rep"
         if has_role "admin"; then S="✅"; else S="❌"; fi; echo -e "  5. $S 管理员 (Administrator)"
         if has_role "other"; then S="✅"; else S="❌"; fi; echo -e "  6. $S 其他 (All Others) ${RED}*全量监控 (慎开)${NC}"
+        
         echo -e "\n${YELLOW}操作选项 (1-6 切换, 0 返回):${NC}"
         read -p "请选择: " OPT
         target=""
@@ -314,6 +327,7 @@ run_manage_roles() {
             4) target="host_rep" ;; 5) target="admin" ;; 6) target="other" ;;
             0) return ;; *) continue ;;
         esac
+        
         if [ -n "$target" ]; then
             if has_role "$target"; then
                 jq --arg r "$target" '.config.monitored_roles -= [$r]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
@@ -327,29 +341,37 @@ run_manage_roles() {
 }
 
 run_ai_switch() {
-    check_service_exists; check_jq
+    check_service_exists
+    check_jq
+    
     local CUR_PROVIDER=$(jq -r '.config.ai_provider // "gemini"' "$CONFIG_FILE")
     local CUR_G_KEY=$(jq -r '.config.gemini_api_key' "$CONFIG_FILE")
     local CUR_G_MODEL=$(jq -r '.config.model // "gemini-2.0-flash-lite"' "$CONFIG_FILE")
+    
     local CUR_CF_ACC=$(jq -r '.config.cf_account_id // ""' "$CONFIG_FILE")
     local CUR_CF_TOK=$(jq -r '.config.cf_api_token // ""' "$CONFIG_FILE")
     local CUR_CF_MODEL=$(jq -r '.config.cf_model // "@cf/meta/llama-3.1-8b-instruct"' "$CONFIG_FILE")
 
     echo -e "\n${CYAN}--- AI 引擎切换 ---${NC}"
     echo -e "当前: ${GREEN}${CUR_PROVIDER^^}${NC}"
+
     echo "  1. Google Gemini"
     echo "  2. Cloudflare Workers AI"
     echo "  0. 返回"
     read -p "选择: " SEL
+    
     case "$SEL" in
         1)
             read -p "API Key (回车保留): " N_KEY
             read -p "Model (回车保留 $CUR_G_MODEL): " N_MODEL
             [ -z "$N_KEY" ] && N_KEY="$CUR_G_KEY"
             [ -z "$N_MODEL" ] && N_MODEL="$CUR_G_MODEL"
-            jq --arg k "$N_KEY" --arg m "$N_MODEL" '.config.ai_provider="gemini" | .config.gemini_api_key=$k | .config.model=$m' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            jq --arg k "$N_KEY" --arg m "$N_MODEL" \
+               '.config.ai_provider="gemini" | .config.gemini_api_key=$k | .config.model=$m' \
+               "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
             msg_ok "已切换至 Gemini，重启中..."
-            run_restart ;;
+            run_restart
+            ;;
         2)
             read -p "Account ID (回车保留): " N_ACC
             read -p "API Token (回车保留): " N_TOK
@@ -357,32 +379,44 @@ run_ai_switch() {
             [ -z "$N_ACC" ] && N_ACC="$CUR_CF_ACC"
             [ -z "$N_TOK" ] && N_TOK="$CUR_CF_TOK"
             [ -z "$N_MODEL" ] && N_MODEL="$CUR_CF_MODEL"
-            jq --arg a "$N_ACC" --arg t "$N_TOK" --arg m "$N_MODEL" '.config.ai_provider="workers" | .config.cf_account_id=$a | .config.cf_api_token=$t | .config.cf_model=$m' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            jq --arg a "$N_ACC" --arg t "$N_TOK" --arg m "$N_MODEL" \
+               '.config.ai_provider="workers" | .config.cf_account_id=$a | .config.cf_api_token=$t | .config.cf_model=$m' \
+               "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
             msg_ok "已切换至 Workers AI，重启中..."
-            run_restart ;;
+            run_restart
+            ;;
         *) return ;;
     esac
 }
 
 run_edit_config() {
-    check_service_exists; check_jq
+    check_service_exists
+    check_jq
     echo "--- 修改基础配置 (直接回车保留) ---"
+    
     local C_PT=$(jq -r '.config.pushplus_token' "$CONFIG_FILE")
     local C_TG_TOK=$(jq -r '.config.telegram_bot_token // ""' "$CONFIG_FILE")
     local C_TG_ID=$(jq -r '.config.telegram_chat_id // ""' "$CONFIG_FILE")
+
     read -p "Pushplus Token: " N_PT
     read -p "Telegram Bot Token: " N_TG_TOK
-    read -p "Telegram Chat/Channel ID (频道需带 -100 前缀): " N_TG_ID
+    read -p "Telegram Chat ID: " N_TG_ID
+    
     [ -z "$N_PT" ] && N_PT="$C_PT"
     [ -z "$N_TG_TOK" ] && N_TG_TOK="$C_TG_TOK"
     [ -z "$N_TG_ID" ] && N_TG_ID="$C_TG_ID"
-    jq --arg a "$N_PT" --arg d "$N_TG_TOK" --arg e "$N_TG_ID" '.config.pushplus_token=$a|.config.telegram_bot_token=$d|.config.telegram_chat_id=$e' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    jq --arg a "$N_PT" --arg d "$N_TG_TOK" --arg e "$N_TG_ID" \
+       '.config.pushplus_token=$a|.config.telegram_bot_token=$d|.config.telegram_chat_id=$e' \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    
     msg_ok "配置已更新，重启中..."
     run_restart
 }
 
 run_edit_frequency() {
-    check_service_exists; check_jq
+    check_service_exists
+    check_jq
     local CUR=$(jq -r '.config.frequency' "$CONFIG_FILE")
     echo "当前: $CUR 秒"
     read -p "新间隔 (秒): " NEW
@@ -392,7 +426,8 @@ run_edit_frequency() {
 }
 
 run_edit_threads() {
-    check_service_exists; check_jq
+    check_service_exists
+    check_jq
     local CUR=$(jq -r '.config.max_workers // 5' "$CONFIG_FILE")
     echo "当前: $CUR"
     read -p "新线程数 (1-100): " NEW
@@ -416,23 +451,36 @@ run_logs() {
     msg_info "正在加载实时日志..."
     echo -e "${YELLOW}👉 按 '0' 返回主菜单 | 按 'Ctrl+C' 退出脚本${NC}"
     echo -e "${GRAY}--------------------------------------------------${NC}"
+    
     local LOG_PID=0
+    # 后台运行日志流
     journalctl -u $SERVICE_NAME -f -n 50 --output cat &
     LOG_PID=$!
+    
     cleanup() {
         if [ "$LOG_PID" -gt 0 ]; then
             kill "$LOG_PID" >/dev/null 2>&1 || true
             wait "$LOG_PID" 2>/dev/null || true
         fi
     }
+    
+    # 捕获 SIGINT (Ctrl+C): 清理并直接退出脚本，回到Shell (不停止服务)
     trap 'trap - EXIT; cleanup; echo -e "\n${GREEN}[Exit] 已退出脚本 (回到Shell)${NC}"; exit 0' SIGINT
+    # 捕获 EXIT: 确保异常退出时也清理日志进程
     trap cleanup EXIT
+
+    # 循环检测按键 '0'
     while true; do
         read -n 1 -s -r key
-        if [[ "$key" == "0" ]]; then break; fi
+        if [[ "$key" == "0" ]]; then
+            break
+        fi
     done
+    
     cleanup
+    # 复原Trap
     trap - SIGINT EXIT
+    
     echo -e "\n${GREEN}[OK] 返回主菜单...${NC}"
     sleep 0.5
 }
@@ -598,6 +646,7 @@ run_update_config_prompt() {
         jq 'if .config.monitored_usernames == null then .config.monitored_usernames = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","administrator"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         
+        # New Toggles (Default True)
         jq 'if .config.enable_pushplus == null then .config.enable_pushplus = true else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.enable_telegram == null then .config.enable_telegram = true else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
@@ -605,8 +654,7 @@ run_update_config_prompt() {
         jq 'if .config.cf_model == null then .config.cf_model = "@cf/meta/llama-3.1-8b-instruct" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
         local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
-        # UPDATED FILTER PROMPT FOR CLEAN FORMAT (Config/Price/Link)
-        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码/闪购** (Sales/Discount/Flash/Promo/Giveaways/Perks/Restock/Order/Deal) 或 **抽奖/赠送/免费试用/送余额** 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL(提取href属性中的完整http链接)>\n📝 **备注**: <截止时间或简评>"
+        local NEW_FILTER_PROMPT="你是一个数据提取机器人。你的任务是检测文本中是否包含 VPS/服务器相关的产品信息。\\n\\n判断规则（非常重要）：\\n1. **不要**判断套餐是否划算、不要判断是否是闪购。\\n2. 只要文本中包含：**价格** (如 $/€/CNY)、**配置** (CPU/RAM/SSD)、**库存** (Stock/Quantity)、**优惠码** (Coupon) 中的任意一项，就必须提取！\\n3. 只有纯粹的闲聊（如“谢谢”、“绑定”、“帮顶”、“已买”）才返回 FALSE。\\n\\n提取格式（不要代码块）：\\n\\n🎁 **内容**: <提取到的配置、价格、流量等所有信息>\\n🏷️ **代码/规则**: <优惠码 或 规则>\\n🔗 **链接**: <URL(提取href属性中的完整http链接)>\\n📝 **备注**: <其他信息>"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
            '.config.thread_prompt = $p | .config.filter_prompt = $f' \
@@ -614,9 +662,9 @@ run_update_config_prompt() {
     fi
 }
 
-# --- 核心代码写入 (Python) ---
+# --- 核心代码写入 (Python: Card-Style Layout & Toggles & Color Logs & Verbose Category) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码..."
+    msg_info "写入 Python 核心代码 (Fix: Title Prefixes)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -635,6 +683,7 @@ import google.generativeai as genai
 from pymongo import MongoClient, errors
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# 颜色定义
 GREEN = '\033[0;32m'
 YELLOW = '\033[0;33m'
 RED = '\033[0;31m'
@@ -657,6 +706,7 @@ def log(msg, color=NC, icon=""):
 
 class ForumMonitor:
     def __init__(self, config_path='data/config.json'):
+        # --- SELF-HEALING SINGLETON ---
         self.lock_file = open('/tmp/forum_monitor.lock', 'w')
         try:
             fcntl.lockf(self.lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -670,6 +720,7 @@ class ForumMonitor:
             except:
                 log("❌ Failed to acquire lock. Exiting.", RED)
                 sys.exit(1)
+        # ------------------------------
 
         self.config_path = config_path
         self.mongo_host = os.getenv("MONGO_HOST", 'mongodb://localhost:27017/')
@@ -796,25 +847,31 @@ class ForumMonitor:
         except: return "FALSE"
 
     def markdown_to_html(self, text):
+        # 1. Clean basics
         text = text.replace("<", "&lt;").replace(">", "&gt;")
         
-        # Matches literal "配置：" at start of line or string
-        text = re.sub(r'(^|\n)(配置：)', r'\1<b>配置：</b>', text)
-        text = re.sub(r'(^|\n)(价格：)', r'\1<b>价格：</b>', text)
-        text = re.sub(r'(^|\n)(链接：)', r'\1<b>链接：</b>', text)
-        text = re.sub(r'(^|\n)(优惠码：)', r'\1<b>优惠码：</b>', text)
-        text = re.sub(r'(^|\n)(总结：)', r'\1<b>总结：</b>', text)
+        # 2. Key headers bolding & spacing for AI Reply Analysis (Card Style)
+        text = re.sub(r'(\n)?🎁\s*内容[:：]', r'<br><b>🎁 内容:</b>', text)
+        text = re.sub(r'(\n)?🏷️\s*(代码|规则)[:：]', r'<br><b>🏷️ 代码/规则:</b>', text)
+        text = re.sub(r'(\n)?🔗\s*链接[:：]', r'<br><b>🔗 链接:</b>', text)
+        text = re.sub(r'(\n)?📝\s*备注[:：]', r'<br><b>📝 备注:</b>', text)
         
-        # Old Thread Analysis Headers (Keep for Thread Summaries)
+        # 3. Thread Analysis Headers
         text = text.replace('🏆 AI 甄选 (高性价比)：', '<b>🏆 AI 甄选 (高性价比)：</b>')
         text = text.replace('VPS 列表：', '<b>VPS 列表：</b>')
         text = text.replace('限时福利：', '<b>限时福利：</b>')
         text = text.replace('基础设施：', '<b>基础设施：</b>')
         text = text.replace('支付方式：', '<b>支付方式：</b>')
         
+        # 4. Standard markdown bold
         text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+        
+        # 5. Global newlines (replace literal \n from AI with <br>)
         text = text.replace('\n', '<br>')
+        
+        # 6. Remove leading breaks
         if text.startswith('<br>'): text = text[4:]
+        
         return text
 
     def handle_thread(self, thread_data, extracted_links):
@@ -844,6 +901,7 @@ class ForumMonitor:
                 safe_creator = thread_data['creator'].replace('<', '&lt;').replace('>', '&gt;')
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
 
+                # ADDED PREFIX HERE for Thread Notifications
                 msg_content = (
                     f"<b>🟢 [新帖] {safe_title}</b><br>"
                     f"👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}<br>"
@@ -899,7 +957,7 @@ class ForumMonitor:
                 )
                 
                 if self.notifier.send_html_message(push_title, msg_content):
-                    self.log_push_history("reply", push_title, comment_data['url'])
+                    self.log_push_history("reply", f"{push_title}", comment_data['url'])
                     
         except errors.DuplicateKeyError: pass 
         except: pass
@@ -987,6 +1045,7 @@ class ForumMonitor:
                     content = p_resp.text
                 has_recent = self.parse_let_comment(content, thread_data)
                 if not silent: 
+                    # UPDATED LOGS: Added Shield Status
                     author = thread_data.get('creator', 'Unknown')
                     title = thread_data.get('title', 'Unknown')
                     log(f"   📄 [Shield:{shield_status}] {WHITE}@{author}{NC} {CYAN}{title[:30]}...{NC} | P{page}/{max_page} | {time.time()-p_start:.2f}s", GRAY)
@@ -1061,10 +1120,12 @@ class ForumMonitor:
             obj_name = url.split('/')[-1]
             try:
                 resp = self.scraper.get(url, timeout=30)
+                
                 shield_state = "✅ 过盾成功" if resp.status_code == 200 else f"❌ 过盾失败 ({resp.status_code})"
                 if resp.status_code != 200:
                     log(f"   -> [{obj_name}] {shield_state}", RED)
                     continue
+                
                 soup = BeautifulSoup(resp.text, 'html.parser')
                 candidates = []
                 for d in soup.select('.ItemDiscussion') + soup.select('tr.ItemDiscussion'):
@@ -1074,6 +1135,7 @@ class ForumMonitor:
                         link = a['href']
                         if not link.startswith('http'): link = "https://lowendtalk.com" + link
                         if link in self.processed_urls_this_cycle: continue
+                        
                         dt = d.select_one('.LastCommentDate time') or d.select_one('.DateUpdated time')
                         if dt and dt.has_attr('datetime'):
                             last_active = datetime.strptime(dt['datetime'], "%Y-%m-%dT%H:%M:%S%z")
@@ -1081,16 +1143,18 @@ class ForumMonitor:
                                 creator = d.select_one('.FirstUser').get_text(strip=True) if d.select_one('.FirstUser') else "Unknown"
                                 candidates.append({'link': link, 'title': a.get_text(strip=True), 'creator': creator})
                     except: continue
+                
                 result_msg = f"发现 {len(candidates)} 新候选项" if candidates else "无新候选项 (RSS已覆盖)"
                 color = YELLOW if candidates else GRAY
                 log(f"   -> [{obj_name}] {shield_state} | 结果: {result_msg}", color)
+
                 for t in candidates: self.fetch_comments(t, silent=False)
             except Exception as e:
                 log(f"   -> [{obj_name}] 错误: {e}", RED)
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v55.5) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v55) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1108,6 +1172,7 @@ if __name__ == "__main__":
     ForumMonitor().start_monitoring()
 EOF
 
+    # 更新依赖
     cat <<EOF > "$APP_DIR/requirements.txt"
 requests
 beautifulsoup4
@@ -1119,6 +1184,7 @@ cloudscraper
 psutil
 EOF
 
+    msg_info "写入推送模块 (Pushplus + Telegram Beautify + Toggles)..."
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
 import requests
@@ -1183,11 +1249,13 @@ class NotificationSender:
         if not self.enable_telegram: return False
         if not self.tg_bot_token or not self.tg_chat_id: return False
         try:
+            # 1. Clean up HTML for Telegram
             msg = html_content.replace("<br>", "\n").replace("<br/>", "\n")
             msg = re.sub(r'<div.*?>', '', msg).replace('</div>', '\n')
             msg = re.sub(r'<span.*?>', '', msg).replace('</span>', ' ')
             msg = re.sub(r'<h4.*?>(.*?)</h4>', r'<b>\1</b>\n', msg)
             while "\n\n\n" in msg: msg = msg.replace("\n\n\n", "\n\n")
+            
             messages = []
             MAX_LEN = 4000
             if len(msg) > MAX_LEN:
@@ -1198,6 +1266,7 @@ class NotificationSender:
                     messages.append(msg[:split_idx])
                     msg = msg[split_idx:]
             else: messages.append(msg)
+
             all_success = True
             for i, part in enumerate(messages):
                 url = f"https://api.telegram.org/bot{self.tg_bot_token}/sendMessage"
@@ -1212,6 +1281,8 @@ class NotificationSender:
 
     def send_html_message(self, title, html_content):
         success_count = 0
+        
+        # Pushplus
         if self.enable_pushplus and self.pushplus_token and self.pushplus_token != "YOUR_PUSHPLUS_TOKEN_HERE":
             try:
                 pp_title = title[:90] + "..." if len(title) > 95 else title
@@ -1225,11 +1296,16 @@ class NotificationSender:
                     if "用户账号使用受限" in reason: level = YELLOW
                     log(f"Pushplus Failed ({resp.status_code}): {reason}", level, "❌")
             except Exception as e: log(f"Pushplus Error: {e}", RED, "❌")
+
+        # Telegram
         if self.send_telegram(title, html_content): success_count += 1
+        
         if success_count > 0: self.record_success(); return True
         return False
 EOF
 }
+
+# --- 部署流程 ---
 
 run_apply_app_update() {
     check_service_exists 
@@ -1242,15 +1318,20 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v55.5 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v55 Edition) ==="
+    
+    # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y python3 python3-pip python3-venv nodejs jq curl gnupg lsb-release
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-pip python3-venv nodejs jq curl gnupg lsb-release
+
+    # 2. 安装 MongoDB (仅当未安装时)
     if ! command -v mongod &> /dev/null; then
         msg_info "安装 MongoDB..."
         local C=$(lsb_release -cs)
         local G="/usr/share/keyrings/mongodb-server.gpg"
+        
         if [ "$C" == "bookworm" ]; then
             curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg --dearmor -o $G
             echo "deb [ arch=amd64,arm64 signed-by=$G ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" | tee /etc/apt/sources.list.d/mongodb-org.list
@@ -1258,33 +1339,42 @@ run_install() {
             curl -fsSL https://www.mongodb.org/static/pgp/server-6.0.asc | gpg --dearmor -o $G
             echo "deb [ arch=amd64,arm64 signed-by=$G ] https://repo.mongodb.org/apt/debian bullseye/mongodb-org/6.0 main" | tee /etc/apt/sources.list.d/mongodb-org.list
         fi
-        apt-get update && apt-get install -y mongodb-org
+        apt-get update -qq && apt-get install -y -qq mongodb-org
     else
         msg_ok "MongoDB 已安装，跳过"
     fi
+
     systemctl start mongod && systemctl enable mongod
+
+    # 3. 部署应用文件
     mkdir -p "$APP_DIR/data"
     _write_python_files_and_deps
+    
+    # 4. 创建虚拟环境 (仅当不存在时)
     if [ ! -d "$VENV_DIR" ]; then 
         msg_info "创建 Python venv..."
         python3 -m venv "$VENV_DIR"
     fi
-    msg_info "安装 Python 依赖 (显示详细日志)..."
-    "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+    
+    msg_info "安装 Python 依赖..."
+    "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt" > /dev/null
+
+    # 5. 生成配置文件
     if [ ! -f "$CONFIG_FILE" ]; then
         read -p "Pushplus Token: " PT
         read -p "Telegram Bot Token: " TG_TOK
-        read -p "Telegram Chat/Channel ID (频道需带 -100 前缀): " TG_ID
+        read -p "Telegram Chat ID: " TG_ID
         read -p "Gemini API Key: " GK
         local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
-        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码/闪购** (Sales/Discount/Flash/Promo/Giveaways/Perks/Restock/Order/Deal) 或 **抽奖/赠送/免费试用/送余额** 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL(提取href属性中的完整http链接)>\n📝 **备注**: <截止时间或简评>"
-
-        jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg fprompt "$NEW_FILTER_PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
-           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: $fprompt, frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
+        
+        jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
+           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: "你是一个数据提取机器人。你的任务是检测文本中是否包含 VPS/服务器相关的产品信息。\\n\\n判断规则（非常重要）：\\n1. **不要**判断套餐是否划算、不要判断是否是闪购。\\n2. 只要文本中包含：**价格** (如 $/€/CNY)、**配置** (CPU/RAM/SSD)、**库存** (Stock/Quantity)、**优惠码** (Coupon) 中的任意一项，就必须提取！\\n3. 只有纯粹的闲聊（如“谢谢”、“绑定”、“帮顶”、“已买”）才返回 FALSE。\\n\\n提取格式（不要代码块）：\\n\\n🎁 **内容**: <提取到的配置、价格、流量等所有信息>\\n🏷️ **代码/规则**: <优惠码 或 规则>\\n🔗 **链接**: <URL(提取href属性中的完整http链接)>\\n📝 **备注**: <其他信息>", frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
     else
         run_update_config_prompt
     fi
+
+    # 6. 配置 Systemd
     cat <<EOF > "$SYSTEMD_SERVICE_FILE"
 [Unit]
 Description=Forum Monitor Service
@@ -1292,6 +1382,7 @@ After=network.target mongod.service
 Requires=mongod.service
 StartLimitInterval=0
 StartLimitBurst=0
+
 [Service]
 Environment="PROXY_HOST="
 Environment="MONGO_HOST=mongodb://localhost:27017/"
@@ -1303,33 +1394,41 @@ WorkingDirectory=$APP_DIR
 ExecStart=$VENV_DIR/bin/python $APP_DIR/$PYTHON_SCRIPT_NAME
 Restart=always
 RestartSec=10
+
 [Install]
 WantedBy=multi-user.target
 EOF
+
     systemctl daemon-reload
     systemctl enable "$SERVICE_NAME.service"
     systemctl start "$SERVICE_NAME.service"
     ln -s -f "$(realpath "$0")" "$SHORTCUT_PATH"
+    
     msg_ok "安装完成! 重新加载中..."
     sleep 2
     exec "$0"
 }
+
+# --- 菜单逻辑 ---
 
 show_menu() {
     clear
     show_dashboard
     echo -e "${GREEN} 选项菜单 ${NC}"
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
+    
     echo -e "${CYAN} [基础管理]${NC}"
     printf "  %-4s %-12s %b%s%b\n" "1." "install" "$GRAY" "安装/重置" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "2." "uninstall" "$GRAY" "彻底卸载" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "3." "update" "$GRAY" "更新代码(补丁)" "$NC"
+    
     echo -e "${CYAN} [服务控制]${NC}"
     printf "  %-4s %-12s %b%s%b\n" "4." "start" "$GRAY" "启动" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "5." "stop" "$GRAY" "停止" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "6." "restart" "$GRAY" "重启" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "7." "status" "$GRAY" "状态" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "8." "logs" "$GRAY" "日志" "$NC"
+
     echo -e "${CYAN} [配置管理]${NC}"
     printf "  %-4s %-12s %b%s%b\n" "9." "edit" "$GRAY" "修改Token/ID" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "10." "ai-switch" "$GRAY" "切换AI引擎" "$NC"
@@ -1337,15 +1436,18 @@ show_menu() {
     printf "  %-4s %-12s %b%s%b\n" "12." "threads" "$GRAY" "修改线程数" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "13." "keepalive" "$GRAY" "开启保活" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "14." "toggle-push" "$GREEN" "推送通道开关" "$NC"
+
     echo -e "${CYAN} [监控规则]${NC}"
     printf "  %-4s %-12s %b%s%b\n" "15." "vip" "$GRAY" "VIP专线" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "16." "roles" "$GRAY" "监控角色" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "17." "users" "$GRAY" "指定用户" "$NC"
+
     echo -e "${CYAN} [功能测试]${NC}"
     printf "  %-4s %-12s %b%s%b\n" "18." "test-ai" "$GRAY" "测试 AI" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "19." "test-push" "$GRAY" "测试推送" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "20." "history" "$GRAY" "推送历史" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "21." "repush" "$GRAY" "手动重推" "$NC"
+
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
     echo -e "  q. quit         退出"
 }
@@ -1382,6 +1484,7 @@ main() {
             *) show_menu; exit 1 ;;
         esac; exit 0
     fi
+
     while true; do
         show_menu
         echo -e -n "${YELLOW}请输入选项: ${NC}"
@@ -1413,4 +1516,5 @@ main() {
         esac
     done
 }
+
 main "$@"
