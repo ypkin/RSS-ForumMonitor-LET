@@ -1414,5 +1414,3 @@ main() {
 }
 main "$@"
 SCRIPT_EOF
-chmod +x ForumMonitor.sh
-./ForumMonitor.sh
