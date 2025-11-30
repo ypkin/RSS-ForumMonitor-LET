@@ -1,4 +1,5 @@
-cat <<'SCRIPT_EOF' > ForumMonitor.sh
+# 1. 写入修复后的脚本文件 (v55.5)
+
 #!/bin/bash
 
 # --- ForumMonitor 管理脚本 (v55.5: Fix Unbound Variable) ---
@@ -1413,4 +1414,3 @@ main() {
     done
 }
 main "$@"
-SCRIPT_EOF
