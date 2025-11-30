@@ -606,7 +606,7 @@ run_update_config_prompt() {
 
         local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         # UPDATED FILTER PROMPT FOR CLEAN FORMAT (Config/Price/Link)
-        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** (Sales) 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必严格按以下格式提取（不要Markdown代码块）：\n\n[促销] <商家名>\n配置：<核心 内存 硬盘 带宽 (若有)>\n价格：<价格 (若有)>\n链接：<提取 href 属性中的完整 http 链接>\n优惠码：<优惠码 (若无则填无)>\n总结：<一句话简短摘要>"
+        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** (Sales/discount/flash/promo/discount/Giveaways/Perks/restock) 或 **抽奖/赠送/免费试用/送余额**  等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必严格按以下格式提取（不要Markdown代码块）：\n\n[促销] <商家名>\n配置：<核心 内存 硬盘 带宽 (若有)>\n价格：<价格 (若有)>\n链接：<提取 href 属性中的完整 http 链接>\n优惠码：<优惠码 (若无则填无)>\n总结：<一句话简短摘要>"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
            '.config.thread_prompt = $p | .config.filter_prompt = $f' \
@@ -1277,7 +1277,7 @@ run_install() {
         read -p "Telegram Chat/Channel ID (频道需带 -100 前缀): " TG_ID
         read -p "Gemini API Key: " GK
         local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
-        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** (Sales) 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必严格按以下格式提取（不要Markdown代码块）：\n\n[促销] <商家名>\n配置：<核心 内存 硬盘 带宽 (若有)>\n价格：<价格 (若有)>\n链接：<提取 href 属性中的完整 http 链接>\n优惠码：<优惠码 (若无则填无)>\n总结：<一句话简短摘要>"
+        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** (Sales/discount/flash/promo/discount/Giveaways/Perks/restock) 或 **抽奖/赠送/免费试用/送余额**  等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必严格按以下格式提取（不要Markdown代码块）：\n\n[促销] <商家名>\n配置：<核心 内存 硬盘 带宽 (若有)>\n价格：<价格 (若有)>\n链接：<提取 href 属性中的完整 http 链接>\n优惠码：<优惠码 (若无则填无)>\n总结：<一句话简短摘要>"
 
         jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg fprompt "$NEW_FILTER_PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
            '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: $fprompt, frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
