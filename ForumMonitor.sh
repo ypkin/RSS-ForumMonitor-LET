@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v62: Restore Header Info) ---
-# Version: 2025.12.01.62
+# --- ForumMonitor 管理脚本 (v66: Distinct Colors) ---
+# Version: 2025.12.01.66
 # Changes:
-# [x] Layout: 在回帖推送中恢复 "👤 用户名 | 🕒 时间 | 🤖 模型" 头部信息。
-# [x] Layout: 保持 v61 的清单式正文排版 ([促销] 商家...)。
+# [x] Color: 区分回复人的颜色图标：
+#     - 🔵 [回复] (楼主本人)
+#     - 🔴 [插播] (其他商家/管理)
 #
 # --- (c) 2025 ---
 
@@ -126,7 +127,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v62: Restore Header)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v66: Distinct Colors)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -561,7 +562,7 @@ time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
 
 title = '🟢 [TEST] 模拟 VPS 优惠通知'
 content = (
-    f'<b>🔴 [TEST] 插播/补货</b>\n'
+    f'<b>🔵 [回复] [TestUser] 帖子标题测试</b>\n'
     f'👤 TestUser | 🕒 {time_str} | 🤖 Mock-Model-v1\n'
     f'{\"-\"*20}\n'
     f'[促销] NovaCloudHosting\n'
@@ -665,7 +666,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python: Header + Custom List Layout) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (v62: Restore Header)..."
+    msg_info "写入 Python 核心代码 (v66: Distinct Colors)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -915,12 +916,17 @@ class ForumMonitor:
                 
                 tp = thread_data.get('creator', 'Unknown').replace('<', '&lt;').replace('>', '&gt;')
                 ra = comment_data['author'].replace('<', '&lt;').replace('>', '&gt;')
+                tt = thread_data.get('title', 'Unknown').replace('<', '&lt;').replace('>', '&gt;')
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
                 time_str = created_at_sh.strftime('%H:%M')
                 
-                push_title = f"🔴 [{tp}] 插播/补货"
+                # v66: Distinct Colors (Blue for Creator, Red for Others)
+                is_op = (comment_data['author'] == thread_data['creator'])
+                type_label = "回复" if is_op else "插播"
+                type_icon = "🔵" if is_op else "🔴"
                 
-                # v62: Restore Header + Clean List Layout
+                push_title = f"{type_icon} [{type_label}] [{tp}] {tt}"
+                
                 msg_content = (
                     f"<b>{push_title}</b>\n"
                     f"👤 {ra} | 🕒 {time_str} | 🤖 {model_n}\n"
@@ -1147,7 +1153,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v62) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v66) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1315,7 +1321,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v62 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v66 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
