@@ -1,11 +1,10 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v55: Verbose Scan Logs) ---
-# Version: 2025.11.29.55
+# --- ForumMonitor 管理脚本 (v56: Link Extractor Edition) ---
+# Version: 2025.11.30.56
 # Changes:
-# [x] Feature: Added explicit Object/Shield-Status/Result logs for page scanning.
-# [x] Config: Max threads limit set to 100.
-# [x] Fix: Log viewer exit behavior (0 to menu, Ctrl+C to shell).
+# [x] Core: 显式提取 HTML 中的 <a> 链接转为文本喂给 AI (解决 AI 看不到链接的问题)。
+# [x] Prompt: 更新提示词，适配直接链接输出。
 #
 # --- (c) 2025 ---
 
@@ -127,7 +126,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v55: Verbose Logs)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v56: Link Extractor)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -653,8 +652,9 @@ run_update_config_prompt() {
         jq 'if .config.ai_provider == null then .config.ai_provider = "gemini" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.cf_model == null then .config.cf_model = "@cf/meta/llama-3.1-8b-instruct" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
-        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码**  或 **抽奖/赠送/免费试用/送余额** (Giveaways/Sale/Deal/Discount/Restock/Flash/Promo/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>"
+        # UPDATED PROMPT: Ask AI to extract link directly
+        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> <如果原文中有下单链接请填在这里>\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Sale/Deal/Discount/Restock/Flash/Promo/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>"
 
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
            '.config.thread_prompt = $p | .config.filter_prompt = $f' \
@@ -662,9 +662,9 @@ run_update_config_prompt() {
     fi
 }
 
-# --- 核心代码写入 (Python: Card-Style Layout & Toggles & Color Logs & Verbose Category) ---
+# --- 核心代码写入 (Python: Link Extraction Logic Added) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (Fix: Title Prefixes)..."
+    msg_info "写入 Python 核心代码 (v56: Link Extractor)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -885,23 +885,14 @@ class ForumMonitor:
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
                 html_summary = self.markdown_to_html(raw_summary)
                 
-                if extracted_links:
-                    parts = html_summary.split("[ORDER_LINK_HERE]")
-                    new_summary = parts[0]
-                    for i in range(1, len(parts)):
-                        if i - 1 < len(extracted_links):
-                            link_url = extracted_links[i-1]
-                            new_summary += f' <a href="{link_url}">[下单地址]</a>' + parts[i]
-                        else: new_summary += parts[i]
-                    html_summary = new_summary
-                else: html_summary = html_summary.replace("[ORDER_LINK_HERE]", "")
+                # Cleanup placeholder if AI still outputs it (fallback)
+                html_summary = html_summary.replace("[ORDER_LINK_HERE]", "")
 
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
                 safe_title = thread_data['title'].replace('<', '&lt;').replace('>', '&gt;')
                 safe_creator = thread_data['creator'].replace('<', '&lt;').replace('>', '&gt;')
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
 
-                # ADDED PREFIX HERE for Thread Notifications
                 msg_content = (
                     f"<b>🟢 [新帖] {safe_title}</b><br>"
                     f"👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}<br>"
@@ -998,6 +989,14 @@ class ForumMonitor:
                 msg_div = comment.find('div', class_='Message')
                 if msg_div:
                     for quote in msg_div.find_all('blockquote'): quote.decompose()
+                    
+                    # --- NEW: Extract Links from Comment for AI ---
+                    for a in msg_div.find_all('a', href=True):
+                        url = a['href']
+                        if "lowendtalk.com" not in url:
+                             a.replace_with(f" {a.get_text(strip=True)} (Link: {url}) ")
+                    # ---------------------------------------------
+                    
                     message = msg_div.get_text(separator=' ', strip=True)
                 else: message = ""
                 
@@ -1045,7 +1044,6 @@ class ForumMonitor:
                     content = p_resp.text
                 has_recent = self.parse_let_comment(content, thread_data)
                 if not silent: 
-                    # UPDATED LOGS: Added Shield Status
                     author = thread_data.get('creator', 'Unknown')
                     title = thread_data.get('title', 'Unknown')
                     log(f"   📄 [Shield:{shield_status}] {WHITE}@{author}{NC} {CYAN}{title[:30]}...{NC} | P{page}/{max_page} | {time.time()-p_start:.2f}s", GRAY)
@@ -1062,7 +1060,20 @@ class ForumMonitor:
             c_tag = item_soup.find('dc:creator') or item_soup.find('creator') or item_soup.find('author')
             if c_tag: creator = c_tag.get_text(strip=True)
             pub_date = datetime.strptime(item_soup.find('pubDate').get_text(), "%a, %d %b %Y %H:%M:%S %z")
-            desc_text = BeautifulSoup(item_soup.find('description').get_text() or "", 'html.parser').get_text(separator=" ", strip=True)
+            
+            # --- NEW: Extract Links from RSS Description for AI ---
+            raw_html = item_soup.find('description').get_text() or ""
+            desc_soup = BeautifulSoup(raw_html, 'html.parser')
+            
+            # Find specific order links to expose to AI
+            for a in desc_soup.find_all('a', href=True):
+                url = a['href']
+                text = a.get_text(strip=True)
+                if any(k in text.lower() for k in ['order', 'buy', 'purchase', 'cart', 'here']) or any(k in url.lower() for k in ['cart', 'aff', 'billing', 'whmcs']):
+                    a.replace_with(f" {text} (下单链接: {url}) ")
+            
+            desc_text = desc_soup.get_text(separator=" ", strip=True)
+            # ---------------------------------------------------
 
             t_data = {'cate': 'let', 'title': title, 'link': link, 'description': desc_text, 'pub_date': pub_date, 'created_at': datetime.utcnow(), 'creator': creator, 'last_page': 1}
             self.processed_urls_this_cycle.add(link)
@@ -1154,7 +1165,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v55) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v56) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1318,7 +1329,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v55 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v56 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
@@ -1365,10 +1376,11 @@ run_install() {
         read -p "Telegram Bot Token: " TG_TOK
         read -p "Telegram Chat ID: " TG_ID
         read -p "Gemini API Key: " GK
-        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> [ORDER_LINK_HERE]\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n(注意：请在**每一个**识别到的套餐价格后面都加上 [ORDER_LINK_HERE] 占位符。)\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        # New Prompt for First Install
+        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> <如果原文中有下单链接请填在这里>\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
         
         jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
-           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: "你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码**  或 **抽奖/赠送/免费试用/送余额** (Giveaways/Sale/Deal/Discount/Restock/Flash/Promo/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>", frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
+           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: "你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Sale/Deal/Discount/Restock/Flash/Promo/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>", frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
     else
         run_update_config_prompt
