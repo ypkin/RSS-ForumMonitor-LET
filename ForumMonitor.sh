@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v56: Link Extractor Edition) ---
-# Version: 2025.11.30.56
+# --- ForumMonitor 管理脚本 (v62: Restore Header Info) ---
+# Version: 2025.12.01.62
 # Changes:
-# [x] Core: 显式提取 HTML 中的 <a> 链接转为文本喂给 AI (解决 AI 看不到链接的问题)。
-# [x] Prompt: 更新提示词，适配直接链接输出。
+# [x] Layout: 在回帖推送中恢复 "👤 用户名 | 🕒 时间 | 🤖 模型" 头部信息。
+# [x] Layout: 保持 v61 的清单式正文排版 ([促销] 商家...)。
 #
 # --- (c) 2025 ---
 
@@ -126,7 +126,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v56: Link Extractor)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v62: Restore Header)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -532,11 +532,11 @@ try:
         model_n = m.config.get('model') if m.ai_provider == 'gemini' else m.config.get('cf_model')
 
         msg_content = (
-            f'<b>🟡 [Repush] {safe_title}</b><br>'
-            f'👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}<br>'
-            f'{\"-\"*20}<br>'
-            f'{html_summary}<br>'
-            f'{\"-\"*20}<br>'
+            f'<b>🟡 [Repush] {safe_title}</b>\n'
+            f'👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}\n'
+            f'{\"-\"*20}\n'
+            f'{html_summary}\n'
+            f'{\"-\"*20}\n'
             f'<a href=\"{t[\"link\"]}\">👉 查看原帖 (Source)</a>'
         )
         
@@ -561,18 +561,18 @@ time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
 
 title = '🟢 [TEST] 模拟 VPS 优惠通知'
 content = (
-    f'<b>🟢 [TEST] 模拟 VPS 优惠通知</b><br>'
-    f'👤 TestUser | 🕒 {time_str} | 🤖 Mock-Model-v1<br>'
-    f'{\"-\"*20}<br>'
-    f'<b>🏆 AI 甄选 (高性价比)：</b><br>'
-    f'• <b>2GB KVM VPS</b> (\$10.00/yr): 价格极低，适合跑测试。<br><br>'
-    f'<b>VPS 列表：</b><br>'
-    f'• <b>4GB RAM Plan</b> → \$20.00/yr <a href=\"https://google.com\">[下单地址]</a><br>'
-    f'   └ 2 Core / 4GB / 50GB NVMe / 1Gbps<br><br>'
-    f'<b>🎁 内容:</b> 模拟的优惠内容描述...<br>'
-    f'<b>🏷️ 代码/规则:</b> TEST-CODE-2025<br>'
-    f'{\"-\"*20}<br>'
-    f'<a href=\"https://google.com\">👉 查看原帖 (Source)</a>'
+    f'<b>🔴 [TEST] 插播/补货</b>\n'
+    f'👤 TestUser | 🕒 {time_str} | 🤖 Mock-Model-v1\n'
+    f'{\"-\"*20}\n'
+    f'[促销] NovaCloudHosting\n'
+    f'配置：4核 24GB 100GB NVMe\n'
+    f'价格：10€/m\n'
+    f'链接：https://shop.novacloud-hosting.com/s\n'
+    f'配置：6核 32GB 200GB NVMe\n'
+    f'价格：14€/m\n'
+    f'链接：https://shop.novacloud-hosting.com/m\n'
+    f'总结：NovaCloudHosting推出荷兰EPYC 7543 VPS限时促销...\n\n'
+    f'原文链接: https://lowendtalk.com/test'
 )
 
 s.send_html_message(title, content)
@@ -652,19 +652,20 @@ run_update_config_prompt() {
         jq 'if .config.ai_provider == null then .config.ai_provider = "gemini" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.cf_model == null then .config.cf_model = "@cf/meta/llama-3.1-8b-instruct" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-        # UPDATED PROMPT: Ask AI to extract link directly
+        # UPDATED PROMPT: Added Price Field & Link Extraction Instructions
         local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> <如果原文中有下单链接请填在这里>\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
-        local NEW_FILTER_PROMPT="你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Sale/Deal/Discount/Restock/Flash/Promo/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>"
-
-        jq --arg p "$NEW_THREAD_PROMPT" --arg f "$NEW_FILTER_PROMPT" \
+        # UPDATED FILTER PROMPT FOR LIST LAYOUT
+        local FILTER="你是一个VPS优惠分析师。请分析这条回复。只有当内容包含实质性优惠（补货/降价/新Offer）时才提取。否则回复 FALSE。\n\n请严格按以下格式输出（不要Markdown代码块）：\n\n[促销] <商家名称>\n配置：<核心> <内存> <硬盘> <带宽/流量>\n价格：<价格>\n链接：<链接>\n(如果有多个套餐，请重复配置、价格、链接这三行)\n总结：<简短摘要>"
+        
+        jq --arg p "$NEW_THREAD_PROMPT" --arg f "$FILTER" \
            '.config.thread_prompt = $p | .config.filter_prompt = $f' \
            "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     fi
 }
 
-# --- 核心代码写入 (Python: Link Extraction Logic Added) ---
+# --- 核心代码写入 (Python: Header + Custom List Layout) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (v56: Link Extractor)..."
+    msg_info "写入 Python 核心代码 (v62: Restore Header)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -836,7 +837,7 @@ class ForumMonitor:
     def get_summarize_from_ai(self, description):
         try: 
             gemini_obj = self.model_summary if self.ai_provider == 'gemini' else None
-            return self.generate_ai_content(self.thread_prompt, description, gemini_obj)
+            return self.generate_ai_content(self.thread_prompt, description, gemini_obj).strip()
         except: return "AI Error"
 
     def get_filter_from_ai(self, description):
@@ -847,30 +848,20 @@ class ForumMonitor:
         except: return "FALSE"
 
     def markdown_to_html(self, text):
-        # 1. Clean basics
+        # v61/62: Simplified cleaner for List Layout
+        text = text.replace('<br>', '\n').replace('<br/>', '\n')
+        text = text.replace('\\n', '\n')
         text = text.replace("<", "&lt;").replace(">", "&gt;")
         
-        # 2. Key headers bolding & spacing for AI Reply Analysis (Card Style)
-        text = re.sub(r'(\n)?🎁\s*内容[:：]', r'<br><b>🎁 内容:</b>', text)
-        text = re.sub(r'(\n)?🏷️\s*(代码|规则)[:：]', r'<br><b>🏷️ 代码/规则:</b>', text)
-        text = re.sub(r'(\n)?🔗\s*链接[:：]', r'<br><b>🔗 链接:</b>', text)
-        text = re.sub(r'(\n)?📝\s*备注[:：]', r'<br><b>📝 备注:</b>', text)
+        # Ensure newlines for keys (for better list formatting)
+        text = re.sub(r'(\n)?(配置|价格|链接|总结)[:：]', r'\n\2：', text)
         
-        # 3. Thread Analysis Headers
-        text = text.replace('🏆 AI 甄选 (高性价比)：', '<b>🏆 AI 甄选 (高性价比)：</b>')
-        text = text.replace('VPS 列表：', '<b>VPS 列表：</b>')
-        text = text.replace('限时福利：', '<b>限时福利：</b>')
-        text = text.replace('基础设施：', '<b>基础设施：</b>')
-        text = text.replace('支付方式：', '<b>支付方式：</b>')
+        # Link cleanup (if AI stacks them)
+        text = text.replace("、http", "\nhttp")
+        text = text.replace(", http", "\nhttp")
         
-        # 4. Standard markdown bold
-        text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-        
-        # 5. Global newlines (replace literal \n from AI with <br>)
-        text = text.replace('\n', '<br>')
-        
-        # 6. Remove leading breaks
-        if text.startswith('<br>'): text = text[4:]
+        # Clean edges
+        text = text.strip()
         
         return text
 
@@ -885,7 +876,6 @@ class ForumMonitor:
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
                 html_summary = self.markdown_to_html(raw_summary)
                 
-                # Cleanup placeholder if AI still outputs it (fallback)
                 html_summary = html_summary.replace("[ORDER_LINK_HERE]", "")
 
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
@@ -894,11 +884,11 @@ class ForumMonitor:
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
 
                 msg_content = (
-                    f"<b>🟢 [新帖] {safe_title}</b><br>"
-                    f"👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}<br>"
-                    f"{'-'*20}<br>"
-                    f"{html_summary}<br>"
-                    f"{'-'*20}<br>"
+                    f"<b>🟢 [新帖] {safe_title}</b>\n"
+                    f"👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}\n"
+                    f"{'-'*20}\n"
+                    f"{html_summary}\n"
+                    f"{'-'*20}\n"
                     f"<a href='{thread_data['link']}'>👉 查看原帖 (Source)</a>"
                 )
                 
@@ -922,29 +912,21 @@ class ForumMonitor:
             if "FALSE" not in upper_resp and "无法分析" not in ai_resp and "CANNOT" not in upper_resp:
                 log(f"      🚀 关键词匹配! 推送中...", GREEN)
                 ai_resp_html = self.markdown_to_html(ai_resp)
-                time_str = created_at_sh.strftime('%H:%M')
                 
                 tp = thread_data.get('creator', 'Unknown').replace('<', '&lt;').replace('>', '&gt;')
                 ra = comment_data['author'].replace('<', '&lt;').replace('>', '&gt;')
-                st = thread_data['title'].replace('<', '&lt;').replace('>', '&gt;')
-                
-                if ra == tp:
-                    push_title = f"🔵 [{tp}] 楼主新回复"
-                    emoji = "🔵"
-                else:
-                    push_title = f"🔴 [{tp}] 插播({ra})"
-                    emoji = "🔴"
-                
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
-
+                time_str = created_at_sh.strftime('%H:%M')
+                
+                push_title = f"🔴 [{tp}] 插播/补货"
+                
+                # v62: Restore Header + Clean List Layout
                 msg_content = (
-                    f"<b>{emoji} {push_title}</b><br><br>"
-                    f"<a href='{thread_data['link']}'>📌 {st}</a><br>"
-                    f"👤 {ra} | 🕒 {time_str} | 🤖 {model_n}<br>"
-                    f"{'-'*20}<br>"
-                    f"{ai_resp_html}<br>"
-                    f"{'-'*20}<br>"
-                    f"<a href='{comment_data['url']}'>👉 查看回复 (Go to Comment)</a>"
+                    f"<b>{push_title}</b>\n"
+                    f"👤 {ra} | 🕒 {time_str} | 🤖 {model_n}\n"
+                    f"{'-'*20}\n"
+                    f"{ai_resp_html}\n\n"
+                    f"原文链接: {comment_data['url']}"
                 )
                 
                 if self.notifier.send_html_message(push_title, msg_content):
@@ -1165,7 +1147,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v56) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v62) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1261,7 +1243,11 @@ class NotificationSender:
         if not self.tg_bot_token or not self.tg_chat_id: return False
         try:
             # 1. Clean up HTML for Telegram
-            msg = html_content.replace("<br>", "\n").replace("<br/>", "\n")
+            msg = html_content 
+            
+            # Legacy cleanup just in case (e.g. if some other source uses br)
+            msg = msg.replace("<br>", "\n").replace("<br/>", "\n")
+            
             msg = re.sub(r'<div.*?>', '', msg).replace('</div>', '\n')
             msg = re.sub(r'<span.*?>', '', msg).replace('</span>', ' ')
             msg = re.sub(r'<h4.*?>(.*?)</h4>', r'<b>\1</b>\n', msg)
@@ -1329,7 +1315,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v56 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v62 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
@@ -1378,9 +1364,11 @@ run_install() {
         read -p "Gemini API Key: " GK
         # New Prompt for First Install
         local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> <如果原文中有下单链接请填在这里>\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        # UPDATED FILTER PROMPT FOR LIST LAYOUT
+        local FILTER="你是一个VPS优惠分析师。请分析这条回复。只有当内容包含实质性优惠（补货/降价/新Offer）时才提取。否则回复 FALSE。\n\n请严格按以下格式输出（不要Markdown代码块）：\n\n[促销] <商家名称>\n配置：<核心> <内存> <硬盘> <带宽/流量>\n价格：<价格>\n链接：<链接>\n(如果有多个套餐，请重复配置、价格、链接这三行)\n总结：<简短摘要>"
         
-        jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" \
-           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: "你是一个VPS社区福利分析师。请分析这条回复。只有当内容包含：**补货/降价/新优惠码** 或 **抽奖/赠送/免费试用/送余额** (Giveaways/Sale/Deal/Discount/Restock/Flash/Promo/Perks) 等实质性利好时，才提取信息。否则回复 FALSE。如果符合，请务必按以下格式提取（不要代码块）：\n\n🎁 **内容**: <套餐配置/价格 或 奖品/赠品内容>\n🏷️ **代码/规则**: <优惠码 或 参与方式>\n🔗 **链接**: <URL>\n📝 **备注**: <截止时间或简评>", frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
+        jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" --arg filter "$FILTER" \
+           '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: $filter, frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
         chmod 600 "$CONFIG_FILE"
     else
         run_update_config_prompt
