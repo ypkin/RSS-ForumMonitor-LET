@@ -7,6 +7,7 @@
 # [x] Prompt: 严格重写提示词，支持多行链接 (链接：URL1 \n 链接：URL2)。
 # [x] Core: 优化 markdown_to_html，确保多行链接在 Telegram 中正确换行显示。
 # [x] Layout: 移除多余的 Markdown 装饰，完全匹配用户要求的文本列表格式。
+# [x] Fix: 修复测试推送时因价格符号导致的 unbound variable 错误。
 #
 # --- (c) 2025 ---
 
@@ -567,7 +568,7 @@ content = (
     f'{\"-\"*20}\n'
     f'[促销] FiberState\n'
     f'配置：AMD Ryzen 7 5700G（8核16线程） 64GB内存 1TB三星NVMe\n'
-    f'价格：$49.95/月 $44.95（限时优惠）\n'
+    f'价格：\$49.95/月 \$44.95（限时优惠）\n'
     f'链接：https://billing.fiberstate.com/index.php?rp=/store/bare-metal/ryzen-7\n'
     f'链接：https://example.com/second-link\n'
     f'优惠码：CYBR7-2025\n'
