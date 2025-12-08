@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v66: Distinct Colors) ---
-# Version: 2025.12.01.66
+# --- ForumMonitor 管理脚本 (v74: Multi-Link Format) ---
+# Version: 2025.12.02.74-LinkFix
 # Changes:
-# [x] Color: 区分回复人的颜色图标：
-#     - 🔵 [回复] (楼主本人)
-#     - 🔴 [插播] (其他商家/管理)
+# [x] Prompt: 严格重写提示词，支持多行链接 (链接：URL1 \n 链接：URL2)。
+# [x] Core: 优化 markdown_to_html，确保多行链接在 Telegram 中正确换行显示。
+# [x] Layout: 移除多余的 Markdown 装饰，完全匹配用户要求的文本列表格式。
 #
 # --- (c) 2025 ---
 
@@ -127,7 +127,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v66: Distinct Colors)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v74: Multi-Link Format)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -522,7 +522,6 @@ try:
         
         raw_summary = m.get_summarize_from_ai(t.get('description', ''))
         html_summary = m.markdown_to_html(raw_summary)
-        html_summary = html_summary.replace('[ORDER_LINK_HERE]', '')
         
         pub_date = t['pub_date']
         if pub_date.tzinfo is None: pub_date = pub_date.replace(tzinfo=timezone.utc)
@@ -538,7 +537,7 @@ try:
             f'{\"-\"*20}\n'
             f'{html_summary}\n'
             f'{\"-\"*20}\n'
-            f'<a href=\"{t[\"link\"]}\">👉 查看原帖 (Source)</a>'
+            f'原文链接: {t[\"link\"]}'
         )
         
         m.notifier.send_html_message(f'🟡 [Repush] {safe_title}', msg_content)
@@ -565,18 +564,19 @@ content = (
     f'<b>🔵 [回复] [TestUser] 帖子标题测试</b>\n'
     f'👤 TestUser | 🕒 {time_str} | 🤖 Mock-Model-v1\n'
     f'{\"-\"*20}\n'
-    f'[促销] NovaCloudHosting\n'
-    f'配置：4核 24GB 100GB NVMe\n'
-    f'价格：10€/m\n'
-    f'链接：https://shop.novacloud-hosting.com/s\n'
-    f'配置：6核 32GB 200GB NVMe\n'
-    f'价格：14€/m\n'
-    f'链接：https://shop.novacloud-hosting.com/m\n'
-    f'总结：NovaCloudHosting推出荷兰EPYC 7543 VPS限时促销...\n\n'
+    f'[促销] FiberState\n'
+    f'配置：AMD Ryzen 7 5700G（8核16线程） 64GB内存 1TB三星NVMe\n'
+    f'价格：$49.95/月 $44.95（限时优惠）\n'
+    f'链接：https://billing.fiberstate.com/index.php?rp=/store/bare-metal/ryzen-7\n'
+    f'链接：https://example.com/second-link\n'
+    f'优惠码：CYBR7-2025\n'
+    f'总结：FiberState推出Cyber Week限时促销...\n\n'
     f'原文链接: https://lowendtalk.com/test'
 )
+# 注意：发送时 send_telegram 会把 \n 转换为 HTML 断行，或者 markdown_to_html 已经转换好了
+content_html = content.replace('\n', '<br>')
 
-s.send_html_message(title, content)
+s.send_html_message(title, content_html)
 "
     "$VENV_DIR/bin/python" -c "$PY_CMD"
 }
@@ -653,10 +653,39 @@ run_update_config_prompt() {
         jq 'if .config.ai_provider == null then .config.ai_provider = "gemini" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.cf_model == null then .config.cf_model = "@cf/meta/llama-3.1-8b-instruct" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-        # UPDATED PROMPT: Added Price Field & Link Extraction Instructions
-        local NEW_THREAD_PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> <如果原文中有下单链接请填在这里>\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
-        # UPDATED FILTER PROMPT FOR LIST LAYOUT
-        local FILTER="你是一个VPS优惠分析师。请分析这条回复。只有当内容包含实质性优惠（补货/降价/新Offer）时才提取。否则回复 FALSE。\n\n请严格按以下格式输出（不要Markdown代码块）：\n\n[促销] <商家名称>\n配置：<核心> <内存> <硬盘> <带宽/流量>\n价格：<价格>\n链接：<链接>\n(如果有多个套餐，请重复配置、价格、链接这三行)\n总结：<简短摘要>"
+        # --- UPDATED PROMPT: STRICT CUSTOM FORMAT WITH MULTI-LINK SUPPORT ---
+        local NEW_THREAD_PROMPT="你是一个中文VPS助手。请分析此促销信息。
+目标：提取文中提到的所有VPS套餐信息。
+规则：
+1. 不要使用 Markdown 代码块。
+2. 不要使用 HTML 标签。
+3. 必须严格按照以下格式输出：
+
+[促销] <商家名称>
+配置：<CPU> <内存> <硬盘> <带宽/流量>
+价格：<价格>
+链接：<购买链接1>
+链接：<购买链接2> (如果有多个链接，请务必换行并在每行开头重复“链接：”)
+优惠码：<优惠码> (没有则不写)
+总结：<简短摘要>
+
+(如果有多个套餐，请空一行后重复上述格式)"
+
+        # UPDATED FILTER PROMPT
+        local FILTER="你是一个VPS优惠分析师。请分析回复。
+规则：
+1. 忽略订单号/晒单/求翻倍(Double Bandwidth)。
+2. 忽略无关闲聊。
+3. 仅提取新优惠。
+
+**格式要求（纯文本，不要Markdown）**：
+
+[促销] <商家名称>
+配置：<核心> <内存> <硬盘> <带宽>
+价格：<价格>
+链接：<链接> (如果有多个，请换行重复“链接：”前缀)
+优惠码：<优惠码> (可选)
+总结：<简短摘要>"
         
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$FILTER" \
            '.config.thread_prompt = $p | .config.filter_prompt = $f' \
@@ -666,7 +695,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python: Header + Custom List Layout) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (v66: Distinct Colors)..."
+    msg_info "写入 Python 核心代码 (v74: Multi-Link Format)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -849,22 +878,31 @@ class ForumMonitor:
         except: return "FALSE"
 
     def markdown_to_html(self, text):
-        # v61/62: Simplified cleaner for List Layout
-        text = text.replace('<br>', '\n').replace('<br/>', '\n')
-        text = text.replace('\\n', '\n')
-        text = text.replace("<", "&lt;").replace(">", "&gt;")
+        # v74: Enhanced Plain Text Formatting for Telegram
         
-        # Ensure newlines for keys (for better list formatting)
-        text = re.sub(r'(\n)?(配置|价格|链接|总结)[:：]', r'\n\2：', text)
+        # 1. Clean Markdown code blocks (the AI shouldn't use them, but just in case)
+        text = text.replace("```html", "").replace("```", "")
         
-        # Link cleanup (if AI stacks them)
-        text = text.replace("、http", "\nhttp")
-        text = text.replace(", http", "\nhttp")
+        # 2. Bold: We keep <b> because sender uses HTML mode, but we strip **
+        text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
         
-        # Clean edges
-        text = text.strip()
+        # 3. Strip all other tags AI might hallucinate
+        text = re.sub(r'</?(span|div|p|font|h[1-6])[^>]*>', '', text, flags=re.IGNORECASE)
         
-        return text
+        # 4. Handle HTML Entities
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        
+        # 5. Restore Safe Tags (<b> and <a>)
+        text = text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>')
+        text = text.replace('&lt;a href="', '<a href="').replace('"&gt;', '">').replace('&lt;/a&gt;', '</a>')
+
+        # 6. CRITICAL: Convert newlines to <br> for Telegram HTML parse mode
+        # This ensures the list format displays vertically.
+        text = text.replace('\n', '<br>')
+        
+        return text.strip()
 
     def handle_thread(self, thread_data, extracted_links):
         try:
@@ -877,6 +915,7 @@ class ForumMonitor:
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
                 html_summary = self.markdown_to_html(raw_summary)
                 
+                # Clean up placeholders
                 html_summary = html_summary.replace("[ORDER_LINK_HERE]", "")
 
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
@@ -885,13 +924,15 @@ class ForumMonitor:
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
 
                 msg_content = (
-                    f"<b>🟢 [新帖] {safe_title}</b>\n"
+                    f"<b>{safe_title}</b>\n"
                     f"👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}\n"
                     f"{'-'*20}\n"
-                    f"{html_summary}\n"
+                    f"{html_summary}\n" # Note: No extra newline needed as html_summary has <br>
                     f"{'-'*20}\n"
-                    f"<a href='{thread_data['link']}'>👉 查看原帖 (Source)</a>"
+                    f"原文链接: {thread_data['link']}"
                 )
+                # Convert outer structure newlines to <br> for final send
+                msg_content = msg_content.replace('\n', '<br>')
                 
                 if self.notifier.send_html_message(f"🟢 [新帖] {safe_title}", msg_content):
                     self.log_push_history("thread", thread_data['title'], thread_data['link'])
@@ -907,6 +948,16 @@ class ForumMonitor:
             
             if not comment_data['message'].strip(): return
 
+            # --- [HARD FILTER] 拦截订单号和翻倍请求 ---
+            msg_lower = comment_data['message'].lower()
+            if ("order" in msg_lower or "invoice" in msg_lower) and ("double" in msg_lower or "bandwidth" in msg_lower):
+                log(f"      🚫 [Filter] 拦截翻倍/晒单", GRAY)
+                return
+            if len(msg_lower) < 60 and (("order" in msg_lower and "#" in msg_lower) or "invoice" in msg_lower):
+                log(f"      🚫 [Filter] 拦截纯订单号", GRAY)
+                return
+            # ---------------------------------------------
+
             ai_resp = self.get_filter_from_ai(comment_data['message'])
             upper_resp = ai_resp.upper()
             
@@ -920,7 +971,7 @@ class ForumMonitor:
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
                 time_str = created_at_sh.strftime('%H:%M')
                 
-                # v66: Distinct Colors (Blue for Creator, Red for Others)
+                # v74: Custom Format Layout
                 is_op = (comment_data['author'] == thread_data['creator'])
                 type_label = "回复" if is_op else "插播"
                 type_icon = "🔵" if is_op else "🔴"
@@ -931,9 +982,11 @@ class ForumMonitor:
                     f"<b>{push_title}</b>\n"
                     f"👤 {ra} | 🕒 {time_str} | 🤖 {model_n}\n"
                     f"{'-'*20}\n"
-                    f"{ai_resp_html}\n\n"
+                    f"{ai_resp_html}\n"
+                    f"{'-'*20}\n"
                     f"原文链接: {comment_data['url']}"
                 )
+                msg_content = msg_content.replace('\n', '<br>')
                 
                 if self.notifier.send_html_message(push_title, msg_content):
                     self.log_push_history("reply", f"{push_title}", comment_data['url'])
@@ -1153,7 +1206,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v66) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v74) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1183,12 +1236,13 @@ cloudscraper
 psutil
 EOF
 
-    msg_info "写入推送模块 (Pushplus + Telegram Beautify + Toggles)..."
+    msg_info "写入推送模块 (Pushplus + Telegram Beautify + Failover)..."
     cat <<'EOF' > "$APP_DIR/send.py"
 import json
 import requests
 import os
 import re
+import html
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from datetime import datetime
@@ -1250,17 +1304,14 @@ class NotificationSender:
         try:
             # 1. Clean up HTML for Telegram
             msg = html_content 
-            
-            # Legacy cleanup just in case (e.g. if some other source uses br)
             msg = msg.replace("<br>", "\n").replace("<br/>", "\n")
-            
             msg = re.sub(r'<div.*?>', '', msg).replace('</div>', '\n')
             msg = re.sub(r'<span.*?>', '', msg).replace('</span>', ' ')
-            msg = re.sub(r'<h4.*?>(.*?)</h4>', r'<b>\1</b>\n', msg)
             while "\n\n\n" in msg: msg = msg.replace("\n\n\n", "\n\n")
             
             messages = []
-            MAX_LEN = 4000
+            # Updated Max Length to Telegram API limit (4096)
+            MAX_LEN = 4095
             if len(msg) > MAX_LEN:
                 while len(msg) > 0:
                     if len(msg) <= MAX_LEN: messages.append(msg); break
@@ -1273,11 +1324,31 @@ class NotificationSender:
             all_success = True
             for i, part in enumerate(messages):
                 url = f"https://api.telegram.org/bot{self.tg_bot_token}/sendMessage"
+                
+                # Try sending as HTML first
                 payload = {'chat_id': self.tg_chat_id, 'text': part, 'parse_mode': 'HTML', 'disable_web_page_preview': True}
                 resp = self.session.post(url, json=payload, timeout=15)
+                
                 if resp.status_code == 200: 
                     log(f"Telegram Success: {title[:25]}...", GREEN, "✈️")
-                else: 
+                else:
+                    # --- Failover: Try sending as Plain Text if HTML fails ---
+                    if resp.status_code == 400:
+                        log(f"⚠️ TG HTML Error ({resp.status_code}). Retrying as Plain Text...", YELLOW)
+                        # Strip all tags and UNESCAPE HTML entities (e.g. &lt; -> <)
+                        clean_text = re.sub(r'<[^>]+>', '', part)
+                        clean_text = html.unescape(clean_text)
+                        
+                        payload_retry = {'chat_id': self.tg_chat_id, 'text': clean_text, 'disable_web_page_preview': True}
+                        retry_resp = self.session.post(url, json=payload_retry, timeout=15)
+                        
+                        if retry_resp.status_code == 200:
+                             log(f"Telegram Text Retry Success: {title[:25]}...", GREEN, "✈️")
+                             continue
+                        else:
+                             log(f"Retry Failed: {retry_resp.text}", RED)
+                    # -------------------------------------------------------
+                    
                     log(f"Telegram Failed ({resp.status_code}): {resp.text}", RED, "❌"); all_success = False
             return all_success
         except Exception as e: log(f"Telegram Error: {e}", RED, "❌"); return False
@@ -1321,7 +1392,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v66 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v74 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
@@ -1368,10 +1439,10 @@ run_install() {
         read -p "Telegram Bot Token: " TG_TOK
         read -p "Telegram Chat ID: " TG_ID
         read -p "Gemini API Key: " GK
-        # New Prompt for First Install
-        local PROMPT="你是一个中文智能助手。请分析这条 VPS 优惠信息，**必须将所有内容（包括机房、配置）翻译为中文**。请筛选出 1-2 个性价比最高的套餐，并严格按照以下格式输出（不要代码块）：\n\n🏆 **AI 甄选 (高性价比)**：\n• **<套餐名>** (<价格>)：<简短推荐理由>\n\nVPS 列表：\n• **<套餐名>** → <价格> <如果原文中有下单链接请填在这里>\n   └ <核心> / <内存> / <硬盘> / <带宽> / <流量>\n\n限时福利：\n• <优惠码/折扣/活动截止时间>\n\n基础设施：\n• <机房位置> | <IP类型> | <网络特点>\n\n支付方式：\n• <支付手段>\n\n🟢 优点: <简短概括>\n🔴 缺点: <简短概括>\n🎯 适合: <适用人群>"
+        # New Prompt for First Install (Strict Format)
+        local PROMPT="你是一个中文VPS助手。请分析此促销信息。\n目标：提取所有套餐信息。\n规则：\n1. 不要使用 Markdown 代码块。\n2. 不要使用 HTML 标签。\n3. 必须严格按照以下格式输出：\n\n[促销] <商家名称>\n配置：<CPU> <内存> <硬盘> <带宽/流量>\n价格：<价格>\n链接：<购买链接1>\n链接：<购买链接2> (如果有多个链接，请换行重复“链接：”前缀)\n优惠码：<优惠码> (没有则不写)\n总结：<简短摘要>\n\n(如果有多个套餐，请空一行后重复上述格式)"
         # UPDATED FILTER PROMPT FOR LIST LAYOUT
-        local FILTER="你是一个VPS优惠分析师。请分析这条回复。只有当内容包含实质性优惠（补货/降价/新Offer）时才提取。否则回复 FALSE。\n\n请严格按以下格式输出（不要Markdown代码块）：\n\n[促销] <商家名称>\n配置：<核心> <内存> <硬盘> <带宽/流量>\n价格：<价格>\n链接：<链接>\n(如果有多个套餐，请重复配置、价格、链接这三行)\n总结：<简短摘要>"
+        local FILTER="你是一个VPS优惠分析师。请分析回复。\n规则：\n1. 忽略订单号/晒单/求翻倍。\n2. 忽略无关闲聊。\n3. 仅提取新优惠。\n\n**格式要求（纯文本，不要Markdown）**：\n\n[促销] <商家名称>\n配置：<核心> <内存> <硬盘> <带宽>\n价格：<价格>\n链接：<链接> (多个链接请换行)\n优惠码：<优惠码> (可选)\n总结：<简短摘要>"
         
         jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" --arg filter "$FILTER" \
            '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: $filter, frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
