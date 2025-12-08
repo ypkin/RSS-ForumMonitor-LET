@@ -1,13 +1,10 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v75: NewThread-Icon) ---
-# Version: 2025.12.08.75-IconFix
+# --- ForumMonitor 管理脚本 (v78: MenuFix) ---
+# Version: 2025.12.08.78-MenuFix
 # Changes:
-# [x] UI: 新帖推送的消息正文标题增加 "🟢 [新帖]" 前缀，与通知标题保持一致。
-# [x] Prompt: 严格重写提示词，支持多行链接 (链接：URL1 \n 链接：URL2)。
-# [x] Core: 优化 markdown_to_html，确保多行链接在 Telegram 中正确换行显示。
-# [x] Layout: 移除多余的 Markdown 装饰，完全匹配用户要求的文本列表格式。
-# [x] Fix: 修复测试推送时因价格符号导致的 unbound variable 错误。
+# [x] UI: 重新排列菜单序号，使其从 1-22 连续，不再有跳跃。
+# [x] Core: 保持 v77 的所有功能（AI提示词管理、强力过滤）不变。
 #
 # --- (c) 2025 ---
 
@@ -129,7 +126,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v75: NewThread-Icon)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v78: MenuFix)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -339,6 +336,110 @@ run_manage_roles() {
                 msg_ok "已启用: $target"
             fi
         fi
+    done
+}
+
+run_manage_prompts() {
+    check_service_exists
+    check_jq
+
+    _edit_prompt_text() {
+        local KEY="$1"
+        local LABEL="$2"
+        local TMP_FILE="/tmp/fm_prompt_edit.txt"
+        
+        # Extract current prompt
+        jq -r ".config.$KEY" "$CONFIG_FILE" > "$TMP_FILE"
+        
+        echo -e "\n${YELLOW}即将打开编辑器 (nano) 修改 [$LABEL]。${NC}"
+        echo -e "${GRAY}修改完成后，按 Ctrl+O 保存，Ctrl+X 退出。${NC}"
+        read -n 1 -s -r -p "按任意键开始..."
+        
+        ${EDITOR:-nano} "$TMP_FILE"
+        
+        if [ -f "$TMP_FILE" ]; then
+            local NEW_CONTENT=$(cat "$TMP_FILE")
+            if [ -n "$NEW_CONTENT" ]; then
+                jq --arg p "$NEW_CONTENT" ".config.$KEY = \$p" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+                msg_ok "[$LABEL] 更新成功！"
+                rm -f "$TMP_FILE"
+                echo -e "需要重启服务生效。正在重启..."
+                run_restart
+            else
+                msg_warn "内容为空，未修改。"
+            fi
+        else
+            msg_err "临时文件丢失，取消操作。"
+        fi
+    }
+
+    _reset_prompts() {
+        echo -e "\n${RED}⚠️ 警告: 将重置所有提示词为默认值！${NC}"
+        read -p "确认重置? (y/n): " CONFIRM
+        if [[ "$CONFIRM" != "y" ]]; then return; fi
+        
+        local DEF_THREAD="你是一个中文VPS助手。请分析此促销信息。
+目标：提取文中提到的所有VPS套餐信息。
+规则：
+1. 不要使用 Markdown 代码块。
+2. 不要使用 HTML 标签。
+3. 必须严格按照以下格式输出：
+
+[促销] <商家名称>
+配置：<CPU> <内存> <硬盘> <带宽/流量>
+价格：<价格>
+链接：<购买链接1>
+链接：<购买链接2> (如果有多个链接，请务必换行并在每行开头重复“链接：”)
+优惠码：<优惠码> (没有则不写)
+总结：<简短摘要>
+
+(如果有多个套餐，请空一行后重复上述格式)"
+
+        local DEF_FILTER="你是一个VPS优惠分析师。请分析回复。
+规则：
+1. 忽略订单号/晒单/求翻倍(Double Bandwidth)。
+2. 忽略无关闲聊。
+3. 仅提取新优惠。
+
+**格式要求（纯文本，不要Markdown）**：
+
+[促销] <商家名称>
+配置：<核心> <内存> <硬盘> <带宽>
+价格：<价格>
+链接：<链接> (如果有多个，请换行重复“链接：”前缀)
+优惠码：<优惠码> (可选)
+总结：<简短摘要>"
+
+        jq --arg p "$DEF_THREAD" --arg f "$DEF_FILTER" \
+           '.config.thread_prompt = $p | .config.filter_prompt = $f' \
+           "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+        
+        msg_ok "提示词已重置。正在重启..."
+        run_restart
+    }
+
+    while true; do
+        clear
+        echo -e "${BLUE}================================================================${NC}"
+        echo -e " ${CYAN}AI 提示词管理 (Prompt Settings)${NC}"
+        echo -e "${BLUE}================================================================${NC}"
+        echo -e "  1. 修改: 帖子摘要提示词 (Thread Summary Prompt)"
+        echo -e "     ${GRAY}* 用于生成新帖子的总结内容${NC}"
+        echo -e "  2. 修改: 回复过滤提示词 (Comment Filter Prompt)"
+        echo -e "     ${GRAY}* 用于分析回帖，提取补货或优惠信息${NC}"
+        echo -e "${GRAY}----------------------------------------------------------------${NC}"
+        echo -e "  3. 重置: 恢复默认提示词 (Reset to Default)"
+        echo -e "  0. 返回上级菜单"
+        echo -e "${BLUE}================================================================${NC}"
+        
+        read -p "请选择: " OPT
+        case "$OPT" in
+            1) _edit_prompt_text "thread_prompt" "帖子摘要提示词"; read -n 1 -s -r -p "..." ;;
+            2) _edit_prompt_text "filter_prompt" "回复过滤提示词"; read -n 1 -s -r -p "..." ;;
+            3) _reset_prompts; read -n 1 -s -r -p "..." ;;
+            0) return ;;
+            *) ;;
+        esac
     done
 }
 
@@ -689,15 +790,16 @@ run_update_config_prompt() {
 优惠码：<优惠码> (可选)
 总结：<简短摘要>"
         
+        # Only update if null, otherwise respect user edits
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$FILTER" \
-           '.config.thread_prompt = $p | .config.filter_prompt = $f' \
+           'if .config.thread_prompt == null then .config.thread_prompt = $p else . end | if .config.filter_prompt == null then .config.filter_prompt = $f else . end' \
            "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     fi
 }
 
-# --- 核心代码写入 (Python: Header + Custom List Layout) ---
+# --- 核心代码写入 (Python: Header + Custom List Layout + JunkFilter) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (v75: NewThread-Icon)..."
+    msg_info "写入 Python 核心代码 (v78: MenuFix)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -880,30 +982,15 @@ class ForumMonitor:
         except: return "FALSE"
 
     def markdown_to_html(self, text):
-        # v75: Enhanced Plain Text Formatting for Telegram
-        
-        # 1. Clean Markdown code blocks (the AI shouldn't use them, but just in case)
         text = text.replace("```html", "").replace("```", "")
-        
-        # 2. Bold: We keep <b> because sender uses HTML mode, but we strip **
         text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-        
-        # 3. Strip all other tags AI might hallucinate
         text = re.sub(r'</?(span|div|p|font|h[1-6])[^>]*>', '', text, flags=re.IGNORECASE)
-        
-        # 4. Handle HTML Entities
         text = text.replace('&', '&amp;')
         text = text.replace('<', '&lt;')
         text = text.replace('>', '&gt;')
-        
-        # 5. Restore Safe Tags (<b> and <a>)
         text = text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>')
         text = text.replace('&lt;a href="', '<a href="').replace('"&gt;', '">').replace('&lt;/a&gt;', '</a>')
-
-        # 6. CRITICAL: Convert newlines to <br> for Telegram HTML parse mode
-        # This ensures the list format displays vertically.
         text = text.replace('\n', '<br>')
-        
         return text.strip()
 
     def handle_thread(self, thread_data, extracted_links):
@@ -916,8 +1003,6 @@ class ForumMonitor:
                 log(f"AI 正在摘要: {thread_data['title'][:20]}...", YELLOW, "🤖")
                 raw_summary = self.get_summarize_from_ai(thread_data['description'])
                 html_summary = self.markdown_to_html(raw_summary)
-                
-                # Clean up placeholders
                 html_summary = html_summary.replace("[ORDER_LINK_HERE]", "")
 
                 time_str = pub_date_sh.strftime('%Y-%m-%d %H:%M')
@@ -929,11 +1014,10 @@ class ForumMonitor:
                     f"<b>🟢 [新帖] {safe_title}</b>\n"
                     f"👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}\n"
                     f"{'-'*20}\n"
-                    f"{html_summary}\n" # Note: No extra newline needed as html_summary has <br>
+                    f"{html_summary}\n" 
                     f"{'-'*20}\n"
                     f"原文链接: {thread_data['link']}"
                 )
-                # Convert outer structure newlines to <br> for final send
                 msg_content = msg_content.replace('\n', '<br>')
                 
                 if self.notifier.send_html_message(f"🟢 [新帖] {safe_title}", msg_content):
@@ -950,14 +1034,25 @@ class ForumMonitor:
             
             if not comment_data['message'].strip(): return
 
-            # --- [HARD FILTER] 拦截订单号和翻倍请求 ---
+            # --- [HARD FILTER] 强力过滤系统 (v76/v77) ---
             msg_lower = comment_data['message'].lower()
+
+            # 1. 拦截翻倍/晒单
             if ("order" in msg_lower or "invoice" in msg_lower) and ("double" in msg_lower or "bandwidth" in msg_lower):
-                log(f"      🚫 [Filter] 拦截翻倍/晒单", GRAY)
-                return
+                log(f"      🚫 [Filter] 拦截翻倍/晒单", GRAY); return
+            
+            # 2. 拦截纯订单号
             if len(msg_lower) < 60 and (("order" in msg_lower and "#" in msg_lower) or "invoice" in msg_lower):
-                log(f"      🚫 [Filter] 拦截纯订单号", GRAY)
-                return
+                log(f"      🚫 [Filter] 拦截纯订单号", GRAY); return
+
+            # 3. 拦截无意义短回复
+            junk_words = ["pm sent", "check pm", "sent you a pm", "replied", "ticket opened", "check ticket", "thanks", "thx", "good luck", "nice offer", "upvoted", "support", "ticket #", "dm sent"]
+            if len(msg_lower) < 50 and any(k in msg_lower for k in junk_words):
+                 log(f"      🚫 [Filter] 拦截水贴/工单回复", GRAY); return
+            
+            # 4. 极短纯文本拦截
+            if len(msg_lower) < 10 and not any(c.isdigit() for c in msg_lower):
+                 log(f"      🚫 [Filter] 拦截极短回复", GRAY); return
             # ---------------------------------------------
 
             ai_resp = self.get_filter_from_ai(comment_data['message'])
@@ -973,7 +1068,6 @@ class ForumMonitor:
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
                 time_str = created_at_sh.strftime('%H:%M')
                 
-                # v75: Custom Format Layout
                 is_op = (comment_data['author'] == thread_data['creator'])
                 type_label = "回复" if is_op else "插播"
                 type_icon = "🔵" if is_op else "🔴"
@@ -1033,12 +1127,10 @@ class ForumMonitor:
                 if msg_div:
                     for quote in msg_div.find_all('blockquote'): quote.decompose()
                     
-                    # --- NEW: Extract Links from Comment for AI ---
                     for a in msg_div.find_all('a', href=True):
                         url = a['href']
                         if "lowendtalk.com" not in url:
                              a.replace_with(f" {a.get_text(strip=True)} (Link: {url}) ")
-                    # ---------------------------------------------
                     
                     message = msg_div.get_text(separator=' ', strip=True)
                 else: message = ""
@@ -1104,11 +1196,9 @@ class ForumMonitor:
             if c_tag: creator = c_tag.get_text(strip=True)
             pub_date = datetime.strptime(item_soup.find('pubDate').get_text(), "%a, %d %b %Y %H:%M:%S %z")
             
-            # --- NEW: Extract Links from RSS Description for AI ---
             raw_html = item_soup.find('description').get_text() or ""
             desc_soup = BeautifulSoup(raw_html, 'html.parser')
             
-            # Find specific order links to expose to AI
             for a in desc_soup.find_all('a', href=True):
                 url = a['href']
                 text = a.get_text(strip=True)
@@ -1116,7 +1206,6 @@ class ForumMonitor:
                     a.replace_with(f" {text} (下单链接: {url}) ")
             
             desc_text = desc_soup.get_text(separator=" ", strip=True)
-            # ---------------------------------------------------
 
             t_data = {'cate': 'let', 'title': title, 'link': link, 'description': desc_text, 'pub_date': pub_date, 'created_at': datetime.utcnow(), 'creator': creator, 'last_page': 1}
             self.processed_urls_this_cycle.add(link)
@@ -1208,7 +1297,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v75) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v78) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1394,7 +1483,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v75 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v78 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
@@ -1515,17 +1604,18 @@ show_menu() {
     printf "  %-4s %-12s %b%s%b\n" "12." "threads" "$GRAY" "修改线程数" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "13." "keepalive" "$GRAY" "开启保活" "$NC"
     printf "  %-4s %-12s %b%s%b\n" "14." "toggle-push" "$GREEN" "推送通道开关" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "15." "prompt" "$GRAY" "AI提示词设置" "$NC"
 
     echo -e "${CYAN} [监控规则]${NC}"
-    printf "  %-4s %-12s %b%s%b\n" "15." "vip" "$GRAY" "VIP专线" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "16." "roles" "$GRAY" "监控角色" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "17." "users" "$GRAY" "指定用户" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "16." "vip" "$GRAY" "VIP专线" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "17." "roles" "$GRAY" "监控角色" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "18." "users" "$GRAY" "指定用户" "$NC"
 
     echo -e "${CYAN} [功能测试]${NC}"
-    printf "  %-4s %-12s %b%s%b\n" "18." "test-ai" "$GRAY" "测试 AI" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "19." "test-push" "$GRAY" "测试推送" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "20." "history" "$GRAY" "推送历史" "$NC"
-    printf "  %-4s %-12s %b%s%b\n" "21." "repush" "$GRAY" "手动重推" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "19." "test-ai" "$GRAY" "测试 AI" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "20." "test-push" "$GRAY" "测试推送" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "21." "history" "$GRAY" "推送历史" "$NC"
+    printf "  %-4s %-12s %b%s%b\n" "22." "repush" "$GRAY" "手动重推" "$NC"
 
     echo -e "${GRAY}----------------------------------------------------------------${NC}"
     echo -e "  q. quit         退出"
@@ -1551,13 +1641,14 @@ main() {
             threads|12) run_edit_threads ;;
             keepalive|13) run_setup_keepalive ;;
             toggle-push|14) run_toggle_push ;;
-            vip|15) run_manage_vip ;;
-            roles|16) run_manage_roles ;;
-            users|17) run_manage_users ;;
-            test-ai|18) run_test_ai ;;
-            test-push|19) run_test_push ;;
-            history|20) run_view_history; read -n 1 -s -r -p "..." ;;
-            repush|21) run_repush_active; read -n 1 -s -r -p "..." ;;
+            prompt|15) run_manage_prompts ;;
+            vip|16) run_manage_vip ;;
+            roles|17) run_manage_roles ;;
+            users|18) run_manage_users ;;
+            test-ai|19) run_test_ai ;;
+            test-push|20) run_test_push ;;
+            history|21) run_view_history; read -n 1 -s -r -p "..." ;;
+            repush|22) run_repush_active; read -n 1 -s -r -p "..." ;;
             update|3) run_apply_app_update; read -n 1 -s -r -p "..." ;; 
             monitor) run_monitor_logic ;;
             *) show_menu; exit 1 ;;
@@ -1583,13 +1674,14 @@ main() {
             12) run_edit_threads; read -n 1 -s -r -p "..." ;;
             13) run_setup_keepalive; read -n 1 -s -r -p "..." ;;
             14) run_toggle_push ;;
-            15) run_manage_vip ;;
-            16) run_manage_roles ;;
-            17) run_manage_users ;;
-            18) run_test_ai; read -n 1 -s -r -p "..." ;;
-            19) run_test_push; read -n 1 -s -r -p "..." ;;
-            20) run_view_history; read -n 1 -s -r -p "..." ;;
-            21) run_repush_active; read -n 1 -s -r -p "..." ;;
+            15) run_manage_prompts ;;
+            16) run_manage_vip ;;
+            17) run_manage_roles ;;
+            18) run_manage_users ;;
+            19) run_test_ai; read -n 1 -s -r -p "..." ;;
+            20) run_test_push; read -n 1 -s -r -p "..." ;;
+            21) run_view_history; read -n 1 -s -r -p "..." ;;
+            22) run_repush_active; read -n 1 -s -r -p "..." ;;
             q|Q|0) break ;;
             *) ;;
         esac
