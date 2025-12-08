@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v74: Multi-Link Format) ---
-# Version: 2025.12.02.74-LinkFix
+# --- ForumMonitor 管理脚本 (v75: NewThread-Icon) ---
+# Version: 2025.12.08.75-IconFix
 # Changes:
+# [x] UI: 新帖推送的消息正文标题增加 "🟢 [新帖]" 前缀，与通知标题保持一致。
 # [x] Prompt: 严格重写提示词，支持多行链接 (链接：URL1 \n 链接：URL2)。
 # [x] Core: 优化 markdown_to_html，确保多行链接在 Telegram 中正确换行显示。
 # [x] Layout: 移除多余的 Markdown 装饰，完全匹配用户要求的文本列表格式。
@@ -127,7 +128,7 @@ show_dashboard() {
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v74: Multi-Link Format)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v75: NewThread-Icon)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -695,7 +696,7 @@ run_update_config_prompt() {
 
 # --- 核心代码写入 (Python: Header + Custom List Layout) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (v74: Multi-Link Format)..."
+    msg_info "写入 Python 核心代码 (v75: NewThread-Icon)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -878,7 +879,7 @@ class ForumMonitor:
         except: return "FALSE"
 
     def markdown_to_html(self, text):
-        # v74: Enhanced Plain Text Formatting for Telegram
+        # v75: Enhanced Plain Text Formatting for Telegram
         
         # 1. Clean Markdown code blocks (the AI shouldn't use them, but just in case)
         text = text.replace("```html", "").replace("```", "")
@@ -924,7 +925,7 @@ class ForumMonitor:
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
 
                 msg_content = (
-                    f"<b>{safe_title}</b>\n"
+                    f"<b>🟢 [新帖] {safe_title}</b>\n"
                     f"👤 {safe_creator} | 🕒 {time_str} | 🤖 {model_n}\n"
                     f"{'-'*20}\n"
                     f"{html_summary}\n" # Note: No extra newline needed as html_summary has <br>
@@ -971,7 +972,7 @@ class ForumMonitor:
                 model_n = self.config.get('model') if self.ai_provider == 'gemini' else self.config.get('cf_model')
                 time_str = created_at_sh.strftime('%H:%M')
                 
-                # v74: Custom Format Layout
+                # v75: Custom Format Layout
                 is_op = (comment_data['author'] == thread_data['creator'])
                 type_label = "回复" if is_op else "插播"
                 type_icon = "🔵" if is_op else "🔴"
@@ -1206,7 +1207,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v74) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v75) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1392,7 +1393,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v74 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v75 Edition) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
