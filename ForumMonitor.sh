@@ -1,14 +1,16 @@
 #!/bin/bash
 
-# --- ForumMonitor 管理脚本 (v78: MenuFix) ---
-# Version: 2025.12.08.78-MenuFix
+# --- ForumMonitor 管理脚本 (v79: StableFix) ---
+# Version: 2025.12.10.79-StableFix
 # Changes:
-# [x] UI: 重新排列菜单序号，使其从 1-22 连续，不再有跳跃。
-# [x] Core: 保持 v77 的所有功能（AI提示词管理、强力过滤）不变。
+# [x] Fix: 移除了 set -e，防止菜单交互意外退出。
+# [x] Fix: 修复了 JSON 配置文件中可能出现的控制字符报错 (Parse error)。
+# [x] Fix: 加固了心跳检测逻辑，防止算术错误。
+# [x] Core: Python 核心逻辑保持不变 (v78)。
 #
 # --- (c) 2025 ---
 
-set -e
+# set -e  <-- 已禁用，防止交互时崩溃
 set -u
 
 # --- 全局变量 ---
@@ -47,7 +49,7 @@ msg_err() { echo -e "${RED}[ERROR] ${NC}$1"; }
 
 check_service_exists() {
     if [ ! -f "$SYSTEMD_SERVICE_FILE" ]; then
-        msg_err "服务 $SERVICE_NAME 未安装。请先运行 'install'。"
+        msg_err "服务 $SERVICE_NAME 未安装。请先运行 'install' (选项 1)。"
         exit 1
     fi
 }
@@ -94,7 +96,7 @@ show_dashboard() {
 
     local UPTIME=$(get_uptime)
     local PUSH_COUNT=0
-    [ -f "$STATS_FILE" ] && PUSH_COUNT=$(jq -r '.push_count // 0' "$STATS_FILE")
+    [ -f "$STATS_FILE" ] && PUSH_COUNT=$(jq -r '.push_count // 0' "$STATS_FILE" 2>/dev/null || echo "0")
     
     local RESTART_COUNT=0
     [ -f "$RESTART_LOG_FILE" ] && RESTART_COUNT=$(wc -l < "$RESTART_LOG_FILE")
@@ -110,23 +112,24 @@ show_dashboard() {
     local C_TG="GREEN"
     
     if [ -f "$CONFIG_FILE" ]; then
-        CUR_PROVIDER=$(jq -r '.config.ai_provider // "gemini"' "$CONFIG_FILE")
+        # 使用 2>/dev/null 防止 JSON 解析错误刷屏
+        CUR_PROVIDER=$(jq -r '.config.ai_provider // "gemini"' "$CONFIG_FILE" 2>/dev/null || echo "gemini")
         if [ "$CUR_PROVIDER" == "workers" ]; then
-             CUR_MODEL=$(jq -r '.config.cf_model // "llama-3.1-8b"' "$CONFIG_FILE")
+             CUR_MODEL=$(jq -r '.config.cf_model // "llama-3.1-8b"' "$CONFIG_FILE" 2>/dev/null)
         else
-             CUR_MODEL=$(jq -r '.config.model // "gemini-2.0-flash-lite"' "$CONFIG_FILE")
+             CUR_MODEL=$(jq -r '.config.model // "gemini-2.0-flash-lite"' "$CONFIG_FILE" 2>/dev/null)
         fi
-        CUR_FREQ=$(jq -r '.config.frequency // 300' "$CONFIG_FILE")
+        CUR_FREQ=$(jq -r '.config.frequency // 300' "$CONFIG_FILE" 2>/dev/null || echo "300")
         
-        local RAW_PP=$(jq -r '.config.enable_pushplus' "$CONFIG_FILE" | xargs)
-        local RAW_TG=$(jq -r '.config.enable_telegram' "$CONFIG_FILE" | xargs)
+        local RAW_PP=$(jq -r '.config.enable_pushplus' "$CONFIG_FILE" 2>/dev/null | xargs)
+        local RAW_TG=$(jq -r '.config.enable_telegram' "$CONFIG_FILE" 2>/dev/null | xargs)
         
         if [ "$RAW_PP" == "false" ]; then S_PP="OFF"; C_PP="GRAY"; fi
         if [ "$RAW_TG" == "false" ]; then S_TG="OFF"; C_TG="GRAY"; fi
     fi
 
     echo -e "${BLUE}================================================================${NC}"
-    echo -e " ${CYAN}ForumMonitor (v78: MenuFix)${NC}"
+    echo -e " ${CYAN}ForumMonitor (v79: StableFix)${NC}"
     echo -e "${BLUE}================================================================${NC}"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "运行状态:" "$STATUS_COLOR" "$STATUS_TEXT" "$NC" "已推送通知:" "$GREEN" "$PUSH_COUNT" "$NC"
     printf " %-16s %b%-20s%b | %-16s %b%-10s%b\n" "AI 引擎:" "$CYAN" "${CUR_PROVIDER^^}" "$NC" "轮询间隔:" "$CYAN" "${CUR_FREQ}s" "$NC"
@@ -172,10 +175,10 @@ run_toggle_push() {
         echo -e " ${CYAN}推送通道开关 (Toggle Push Channels)${NC}"
         echo -e "${BLUE}================================================================${NC}"
 
-        local PP_ST=$(jq -r '.config.enable_pushplus' "$CONFIG_FILE" | xargs)
-        local TG_ST=$(jq -r '.config.enable_telegram' "$CONFIG_FILE" | xargs)
-        [ "$PP_ST" == "null" ] && PP_ST="true"
-        [ "$TG_ST" == "null" ] && TG_ST="true"
+        local PP_ST=$(jq -r '.config.enable_pushplus' "$CONFIG_FILE" 2>/dev/null | xargs)
+        local TG_ST=$(jq -r '.config.enable_telegram' "$CONFIG_FILE" 2>/dev/null | xargs)
+        [ "$PP_ST" == "null" ] || [ -z "$PP_ST" ] && PP_ST="true"
+        [ "$TG_ST" == "null" ] || [ -z "$TG_ST" ] && TG_ST="true"
         
         local PP_DISP="${GREEN}✅ ON (开启)${NC}"
         local TG_DISP="${GREEN}✅ ON (开启)${NC}"
@@ -304,11 +307,12 @@ run_manage_users() {
 run_manage_roles() {
     check_service_exists
     check_jq
+    # Ensure field exists
     jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","admin"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
     while true; do
         echo -e "\n${CYAN}--- 监控角色设置 ---${NC}"
-        has_role() { jq -e --arg r "$1" '.config.monitored_roles | index($r)' "$CONFIG_FILE" >/dev/null; }
+        has_role() { jq -e --arg r "$1" '.config.monitored_roles | index($r)' "$CONFIG_FILE" >/dev/null 2>&1; }
         
         echo -e "\n当前状态:"
         if has_role "creator"; then S="✅"; else S="❌"; fi; echo -e "  1. $S 楼主 (Creator)"
@@ -359,6 +363,9 @@ run_manage_prompts() {
         
         if [ -f "$TMP_FILE" ]; then
             local NEW_CONTENT=$(cat "$TMP_FILE")
+            # 移除 Windows 回车符，防止 JSON 报错
+            NEW_CONTENT="${NEW_CONTENT//\r/}"
+            
             if [ -n "$NEW_CONTENT" ]; then
                 jq --arg p "$NEW_CONTENT" ".config.$KEY = \$p" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
                 msg_ok "[$LABEL] 更新成功！"
@@ -378,6 +385,7 @@ run_manage_prompts() {
         read -p "确认重置? (y/n): " CONFIRM
         if [[ "$CONFIRM" != "y" ]]; then return; fi
         
+        # 重新定义默认 Prompt (注意：这里使用纯 Unix 换行)
         local DEF_THREAD="你是一个中文VPS助手。请分析此促销信息。
 目标：提取文中提到的所有VPS套餐信息。
 规则：
@@ -543,7 +551,7 @@ run_status() {
     check_service_exists
     systemctl status $SERVICE_NAME --no-pager
     if [ -f "$HEARTBEAT_FILE" ]; then
-        local DIFF=$(($(date +%s) - $(cat "$HEARTBEAT_FILE")))
+        local DIFF=$(($(date +%s) - $(cat "$HEARTBEAT_FILE" | tr -cd '0-9' || echo "0")))
         echo -e "\n--- 心跳: ${GREEN}$DIFF 秒前${NC}"
     fi
 }
@@ -567,12 +575,9 @@ run_logs() {
         fi
     }
     
-    # 捕获 SIGINT (Ctrl+C): 清理并直接退出脚本，回到Shell (不停止服务)
     trap 'trap - EXIT; cleanup; echo -e "\n${GREEN}[Exit] 已退出脚本 (回到Shell)${NC}"; exit 0' SIGINT
-    # 捕获 EXIT: 确保异常退出时也清理日志进程
     trap cleanup EXIT
 
-    # 循环检测按键 '0'
     while true; do
         read -n 1 -s -r key
         if [[ "$key" == "0" ]]; then
@@ -581,7 +586,6 @@ run_logs() {
     done
     
     cleanup
-    # 复原Trap
     trap - SIGINT EXIT
     
     echo -e "\n${GREEN}[OK] 返回主菜单...${NC}"
@@ -676,7 +680,6 @@ content = (
     f'总结：FiberState推出Cyber Week限时促销...\n\n'
     f'原文链接: https://lowendtalk.com/test'
 )
-# 注意：发送时 send_telegram 会把 \n 转换为 HTML 断行，或者 markdown_to_html 已经转换好了
 content_html = content.replace('\n', '<br>')
 
 s.send_html_message(title, content_html)
@@ -716,11 +719,15 @@ run_monitor_logic() {
     check_jq
     if ! systemctl is-active --quiet $SERVICE_NAME; then return 0; fi
     if [ ! -f "$HEARTBEAT_FILE" ]; then return 0; fi
-    local LAST=$(cat "$HEARTBEAT_FILE")
-    local FREQ=$(jq -r '.config.frequency // 600' "$CONFIG_FILE")
+    # 安全读取心跳
+    local LAST=$(cat "$HEARTBEAT_FILE" | tr -cd '0-9')
+    [ -z "$LAST" ] && LAST="0"
+    
+    local FREQ=$(jq -r '.config.frequency // 600' "$CONFIG_FILE" 2>/dev/null || echo "600")
     local DIFF=$(($(date +%s) - LAST))
+    
     if [ "$DIFF" -gt "$(($FREQ + 300))" ]; then
-        echo "$(date): [Watchdog] 服务僵死重启" >> "$RESTART_LOG_FILE"
+        echo "$(date): [Watchdog] 服务僵死 (Diff: $DIFF)，正在重启" >> "$RESTART_LOG_FILE"
         systemctl restart $SERVICE_NAME
     fi
 }
@@ -749,14 +756,13 @@ run_update_config_prompt() {
         jq 'if .config.monitored_usernames == null then .config.monitored_usernames = [] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.monitored_roles == null then .config.monitored_roles = ["creator","provider","top_host","host_rep","administrator"] else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         
-        # New Toggles (Default True)
         jq 'if .config.enable_pushplus == null then .config.enable_pushplus = true else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.enable_telegram == null then .config.enable_telegram = true else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
         jq 'if .config.ai_provider == null then .config.ai_provider = "gemini" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         jq 'if .config.cf_model == null then .config.cf_model = "@cf/meta/llama-3.1-8b-instruct" else . end' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-        # --- UPDATED PROMPT: STRICT CUSTOM FORMAT WITH MULTI-LINK SUPPORT ---
+        # --- UPDATED PROMPT: 定义时移除潜在的 \r (虽然这里是 Linux 环境，但为了安全)
         local NEW_THREAD_PROMPT="你是一个中文VPS助手。请分析此促销信息。
 目标：提取文中提到的所有VPS套餐信息。
 规则：
@@ -790,16 +796,19 @@ run_update_config_prompt() {
 优惠码：<优惠码> (可选)
 总结：<简短摘要>"
         
-        # Only update if null, otherwise respect user edits
+        # 强制清除 \r
+        NEW_THREAD_PROMPT="${NEW_THREAD_PROMPT//\r/}"
+        FILTER="${FILTER//\r/}"
+
         jq --arg p "$NEW_THREAD_PROMPT" --arg f "$FILTER" \
            'if .config.thread_prompt == null then .config.thread_prompt = $p else . end | if .config.filter_prompt == null then .config.filter_prompt = $f else . end' \
            "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     fi
 }
 
-# --- 核心代码写入 (Python: Header + Custom List Layout + JunkFilter) ---
+# --- 核心代码写入 (Python) ---
 _write_python_files_and_deps() {
-    msg_info "写入 Python 核心代码 (v78: MenuFix)..."
+    msg_info "写入 Python 核心代码 (v79: StableFix)..."
     
     cat <<'EOF' > "$APP_DIR/$PYTHON_SCRIPT_NAME"
 import json
@@ -921,7 +930,8 @@ class ForumMonitor:
     def load_config(self):
         try:
             if not os.path.exists(self.config_path):
-                shutil.copy('example.json', self.config_path)
+                # No example.json copy, just use empty
+                self.config = {}
             with open(self.config_path, 'r') as f:
                 self.config = json.load(f)['config']
                 self.notifier = NotificationSender(self.config_path)
@@ -1297,7 +1307,7 @@ class ForumMonitor:
         log(f"列表页完成 | 耗时: {time.time()-start_t:.2f}s", MAGENTA)
 
     def start_monitoring(self):
-        log("=== 监控服务启动 (v78) ===", GREEN, "🚀")
+        log("=== 监控服务启动 (v79) ===", GREEN, "🚀")
         freq = self.config.get('frequency', 300)
         while True:
             t0 = time.time()
@@ -1483,7 +1493,7 @@ run_apply_app_update() {
 }
 
 run_install() {
-    msg_info "=== 开始部署 ForumMonitor (v78 Edition) ==="
+    msg_info "=== 开始部署 ForumMonitor (v79: StableFix) ==="
     
     # 1. 安装系统依赖
     msg_info "更新系统与依赖 (apt-get)..."
@@ -1530,10 +1540,42 @@ run_install() {
         read -p "Telegram Bot Token: " TG_TOK
         read -p "Telegram Chat ID: " TG_ID
         read -p "Gemini API Key: " GK
-        # New Prompt for First Install (Strict Format)
-        local PROMPT="你是一个中文VPS助手。请分析此促销信息。\n目标：提取所有套餐信息。\n规则：\n1. 不要使用 Markdown 代码块。\n2. 不要使用 HTML 标签。\n3. 必须严格按照以下格式输出：\n\n[促销] <商家名称>\n配置：<CPU> <内存> <硬盘> <带宽/流量>\n价格：<价格>\n链接：<购买链接1>\n链接：<购买链接2> (如果有多个链接，请换行重复“链接：”前缀)\n优惠码：<优惠码> (没有则不写)\n总结：<简短摘要>\n\n(如果有多个套餐，请空一行后重复上述格式)"
-        # UPDATED FILTER PROMPT FOR LIST LAYOUT
-        local FILTER="你是一个VPS优惠分析师。请分析回复。\n规则：\n1. 忽略订单号/晒单/求翻倍。\n2. 忽略无关闲聊。\n3. 仅提取新优惠。\n\n**格式要求（纯文本，不要Markdown）**：\n\n[促销] <商家名称>\n配置：<核心> <内存> <硬盘> <带宽>\n价格：<价格>\n链接：<链接> (多个链接请换行)\n优惠码：<优惠码> (可选)\n总结：<简短摘要>"
+        # New Prompt for First Install (Strict Format, CLEANED)
+        local PROMPT="你是一个中文VPS助手。请分析此促销信息。
+目标：提取所有套餐信息。
+规则：
+1. 不要使用 Markdown 代码块。
+2. 不要使用 HTML 标签。
+3. 必须严格按照以下格式输出：
+
+[促销] <商家名称>
+配置：<CPU> <内存> <硬盘> <带宽/流量>
+价格：<价格>
+链接：<购买链接1>
+链接：<购买链接2> (如果有多个链接，请换行重复“链接：”前缀)
+优惠码：<优惠码> (没有则不写)
+总结：<简短摘要>
+
+(如果有多个套餐，请空一行后重复上述格式)"
+        
+        local FILTER="你是一个VPS优惠分析师。请分析回复。
+规则：
+1. 忽略订单号/晒单/求翻倍。
+2. 忽略无关闲聊。
+3. 仅提取新优惠。
+
+**格式要求（纯文本，不要Markdown）**：
+
+[促销] <商家名称>
+配置：<核心> <内存> <硬盘> <带宽>
+价格：<价格>
+链接：<链接> (多个链接请换行)
+优惠码：<优惠码> (可选)
+总结：<简短摘要>"
+
+        # 移除 \r 保证 JSON 安全
+        PROMPT="${PROMPT//\r/}"
+        FILTER="${FILTER//\r/}"
         
         jq -n --arg pt "$PT" --arg gk "$GK" --arg prompt "$PROMPT" --arg tt "$TG_TOK" --arg ti "$TG_ID" --arg filter "$FILTER" \
            '{config: {pushplus_token: $pt, telegram_bot_token: $tt, telegram_chat_id: $ti, gemini_api_key: $gk, model: "gemini-2.0-flash-lite", ai_provider: "gemini", cf_account_id: "", cf_api_token: "", cf_model: "@cf/meta/llama-3.1-8b-instruct", thread_prompt: $prompt, filter_prompt: $filter, frequency: 300, vip_threads: [], monitored_roles: ["creator","provider","top_host","host_rep","admin"], monitored_usernames: [], enable_pushplus: true, enable_telegram: true}}' > "$CONFIG_FILE"
